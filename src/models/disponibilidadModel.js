@@ -2,40 +2,59 @@
 import { pool } from '../config/db.js';
 
 /**
- * Crea la fila de disponibilidad si no existe (cupos_totales por defecto = 30).
+ * Asegura que exista la fila de disponibilidad (crea si no existe)
+ * y la devuelve. Útil para verificar stock antes de reservar.
+ *
+ * @param {number} paqueteId
+ * @param {string} fecha - 'YYYY-MM-DD'
+ * @returns {Promise<{id:number, paquete_id:number, fecha:string, cupos_totales:number, cupos_reservados:number} | null>}
  */
-export async function ensureDisponibilidad(paqueteId, fecha, cuposTotales = 30) {
-  const sql = `
-    INSERT INTO disponibilidad (paquete_id, fecha, cupos_totales, cupos_reservados)
-    VALUES ($1, $2, $3, 0)
-    ON CONFLICT (paquete_id, fecha) DO NOTHING
-  `;
-  await pool.query(sql, [paqueteId, fecha, cuposTotales]);
+export async function ensureAndGetDisponibilidad(paqueteId, fecha) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Crea la fila si no existe (30 cupos por defecto)
+    await client.query(
+      `
+      INSERT INTO disponibilidad (paquete_id, fecha, cupos_totales, cupos_reservados)
+      VALUES ($1, $2, 30, 0)
+      ON CONFLICT (paquete_id, fecha) DO NOTHING
+      `,
+      [paqueteId, String(fecha)]
+    );
+
+    // Lee la disponibilidad actual
+    const { rows } = await client.query(
+      `
+      SELECT id, paquete_id, fecha, cupos_totales, cupos_reservados
+        FROM disponibilidad
+       WHERE paquete_id = $1 AND fecha = $2
+      `,
+      [paqueteId, String(fecha)]
+    );
+
+    await client.query('COMMIT');
+    return rows[0] || null;
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch {}
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
- * Obtiene la disponibilidad; si forUpdate=true, bloquea la fila.
+ * Solo obtiene la fila (no crea si falta)
  */
-export async function getDisponibilidad(paqueteId, fecha, forUpdate = false) {
-  let sql = `
-    SELECT id, cupos_totales, cupos_reservados
-    FROM disponibilidad
-    WHERE paquete_id = $1 AND fecha = $2
-  `;
-  if (forUpdate) sql += ' FOR UPDATE';
-
-  const { rows } = await pool.query(sql, [paqueteId, fecha]);
-  return rows;
-}
-
-/**
- * Incrementa la cantidad de cupos reservados.
- */
-export async function reservarCupos(paqueteId, fecha, cantidad) {
-  const sql = `
-    UPDATE disponibilidad
-       SET cupos_reservados = cupos_reservados + $1
-     WHERE paquete_id = $2 AND fecha = $3
-  `;
-  await pool.query(sql, [cantidad, paqueteId, fecha]);
+export async function getDisponibilidad(paqueteId, fecha) {
+  const { rows } = await pool.query(
+    `
+    SELECT id, paquete_id, fecha, cupos_totales, cupos_reservados
+      FROM disponibilidad
+     WHERE paquete_id = $1 AND fecha = $2
+    `,
+    [paqueteId, String(fecha)]
+  );
+  return rows[0] || null;
 }
