@@ -1,36 +1,28 @@
-﻿import express from 'express';
+﻿// src/server.js
+import express from 'express';
 import cors from 'cors';
-import pino from 'pino';
-import pinoHttp from 'pino-http';
-import dotenv from 'dotenv';
-import path from 'path';
-import fs from 'fs';
-import YAML from 'yaml';
-import swaggerUi from 'swagger-ui-express';
-
-import integracionRoutes from './routes/integracionRoutes.js';
-
-dotenv.config();
+import { router as integracionRouter } from './routes/integracion.js';
+import { logger } from './config/logger.js'; // si lo tienes
 
 const app = express();
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
-
-app.use(pinoHttp({ logger }));
-app.use(cors({ origin: '*', credentials: false }));
+app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
-app.get('/health', (req, res) => res.json({ ok:true, ts: Date.now() }));
+// rutas
+app.use('/api/integracion', integracionRouter);
 
-const ymlPath = path.join(process.cwd(), 'src', 'openapi.yaml');
-const swaggerDoc = YAML.parse(fs.readFileSync(ymlPath, 'utf8'));
-app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerDoc));
-app.get('/docs/openapi.json', (req, res) => res.json(swaggerDoc));
+// puerto y host para Render
+const PORT = Number(process.env.PORT || 3000);
+const HOST = '0.0.0.0';
 
-app.use('/api/integracion', integracionRoutes);
+app.get('/', (_req, res) => {
+  res.json({ ok: true, service: 'rest-integracion-backend' });
+});
 
-const port = process.env.PORT || 3001;
-app.listen(port, () => {
-  logger.info(REST Integración escuchando en http://localhost:);
-  logger.info(Docs: http://localhost:/docs);
+app.listen(PORT, HOST, () => {
+  const base = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+
+  logger
+    ? logger.info(`REST Integración escuchando en ${base}`)
+    : console.log(`REST Integración escuchando en ${base}`);
 });
