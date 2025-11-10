@@ -1,7 +1,7 @@
 ﻿// src/server.js
 import express from 'express';
 import cors from 'cors';
-import { router as integracionRouter } from './routes/integracion.js';
+import integracionRouter from './routes/integracionRoutes.js';
 import { logger } from './config/logger.js'; // si lo tienes
 
 const app = express();
