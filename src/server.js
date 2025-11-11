@@ -3,6 +3,8 @@ import cors from 'cors';
 import integracionRouter from './routes/integracionRoutes.js';
 import { pool } from './config/db.js'; // default import correcto
 // import { logger } from './config/logger.js'; // opcional
+// ⚠️ Temporal y sólo para desbloquear certificados self-signed
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const app = express();
 app.use(cors());
