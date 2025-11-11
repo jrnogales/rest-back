@@ -2,17 +2,10 @@
 import pkg from 'pg';
 const { Pool } = pkg;
 
-// Por defecto usa SSL (render/neon/heroku lo requieren)
-const sslMode = (process.env.DB_SSL || 'true').toLowerCase();
-
-const ssl =
-  sslMode === 'false' || sslMode === 'off'
-    ? false
-    : { rejectUnauthorized: false };
-
+// Fuerza SSL con no-verify para cert self-signed
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl
+  ssl: { rejectUnauthorized: false }   // <-- clave
 });
 
 export default pool;
