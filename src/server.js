@@ -1,6 +1,7 @@
 ﻿import express from 'express';
 import cors from 'cors';
-import integracionRouter from './routes/integracionRoutes.js'; // default import correcto
+import integracionRouter from './routes/integracionRoutes.js';
+import { pool } from './config/db.js'; // default import correcto
 // import { logger } from './config/logger.js'; // opcional
 
 const app = express();
@@ -14,6 +15,16 @@ const HOST = '0.0.0.0';
 
 app.get('/', (_req, res) => {
   res.json({ ok: true, service: 'rest-integracion-backend' });
+});
+
+app.get('/__debug/db', async (_req, res) => {
+  try {
+    const r = await pool.query('SELECT 1 as ok');
+    res.json({ ok: true, db: r.rows[0] });
+  } catch (e) {
+    console.error('[DB PING ERROR]', e);
+    res.status(500).json({ ok:false, error: e.message });
+  }
 });
 
 app.listen(PORT, HOST, () => {
