@@ -2,10 +2,10 @@
 import pkg from 'pg';
 const { Pool } = pkg;
 
-// Fuerza SSL con no-verify para cert self-signed
+// Fuerza SSL con no-verify para certificados self-signed
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }   // <-- clave
+  ssl: { rejectUnauthorized: false }
 });
 
 export default pool;

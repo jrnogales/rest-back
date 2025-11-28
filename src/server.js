@@ -17,6 +17,10 @@ app.use(express.json());
 // ✅ Rutas versionadas: /api/v1/integracion/...
 app.use(`/api/${API_VERSION}/integracion`, integracionRouter);
 
+import authRoutes from './routes/authRoutes.js';
+app.use(`/api/${API_VERSION}/auth`, authRoutes);
+
+
 // ✅ Compatibilidad hacia atrás (si alguien usa /api/integracion)
 app.use('/api/integracion', (req, res) => {
   const nuevaRuta = `/api/${API_VERSION}/integracion${req.url}`;
