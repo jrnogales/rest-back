@@ -17,9 +17,13 @@ app.use(express.json());
 // ✅ Rutas versionadas: /api/v1/integracion/...
 app.use(`/api/${API_VERSION}/integracion`, integracionRouter);
 
+// --- AUTH ---
 import authRoutes from './routes/authRoutes.js';
 app.use(`/api/${API_VERSION}/auth`, authRoutes);
 
+// --- RESERVAS DEL USUARIO (NUEVO) ---
+import reservasRoutes from './routes/reservasRoutes.js';
+app.use(`/api/${API_VERSION}/reservas`, reservasRoutes);
 
 // ✅ Compatibilidad hacia atrás (si alguien usa /api/integracion)
 app.use('/api/integracion', (req, res) => {
