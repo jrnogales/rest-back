@@ -5,7 +5,14 @@ import { pool } from '../config/db.js';
  * Crea una reserva con control de stock y disponibilidad.
  * Retorna { ok, codigoReserva, total }
  */
-export async function crearReserva({ codigo, fecha, adultos = 1, ninos = 0, origen = 'REST' }) {
+export async function crearReserva({
+  codigo,
+  fecha,
+  adultos = 1,
+  ninos = 0,
+  origen = 'REST',
+  usuarioId = null      // 👈 nuevo: guarda el dueño de la reserva
+}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -55,14 +62,14 @@ export async function crearReserva({ codigo, fecha, adultos = 1, ninos = 0, orig
       Number(adultos || 0) * Number(p.precio_adulto || 0) +
       Number(ninos || 0) * Number(p.precio_nino || 0);
 
-    // 5) Generar código
+    // 5) Generar código de reserva
     const code =
       'RES-' +
       new Date().toISOString().slice(0, 10).replace(/-/g, '') +
       '-' +
       Math.random().toString(36).slice(2, 6).toUpperCase();
 
-    // 6) Insert reserva
+    // 6) Insert reserva (con usuario_id)
     await client.query(
       `
       INSERT INTO reservas
@@ -70,7 +77,16 @@ export async function crearReserva({ codigo, fecha, adultos = 1, ninos = 0, orig
       VALUES
         ($1, $2, $3, $4, $5, $6, $7, $8)
       `,
-      [code, p.id, null, String(fecha), Number(adultos || 0), Number(ninos || 0), total, String(origen)]
+      [
+        code,
+        p.id,
+        usuarioId, 
+        String(fecha),
+        Number(adultos || 0),
+        Number(ninos || 0),
+        total,
+        String(origen)
+      ]
     );
 
     // 7) Descontar cupos
@@ -93,9 +109,8 @@ export async function crearReserva({ codigo, fecha, adultos = 1, ninos = 0, orig
   }
 }
 
-
 /**
- * Cancela reserva, devuelve cupos
+ * Cancela reserva, devuelve cupos.
  * Retorna { ok }
  */
 export async function cancelarReserva(bookingId) {
@@ -131,24 +146,15 @@ export async function cancelarReserva(bookingId) {
       [solicitados, r.paquete_id, String(r.fecha_viaje)]
     );
 
-    // 3) ¿Existe columna estado?
-    const HAS_ESTADO = true;   // ✅ Cambia a false si NO existe columna estado
-
-    if (HAS_ESTADO) {
-      await client.query(
-        `
-        UPDATE reservas
-           SET estado = 'CANCELADA'
-         WHERE id = $1
-        `,
-        [r.id]
-      );
-    } else {
-      await client.query(
-        `DELETE FROM reservas WHERE id = $1`,
-        [r.id]
-      );
-    }
+    // 3) marcar como cancelada (si la columna existe)
+    await client.query(
+      `
+      UPDATE reservas
+         SET estado = 'CANCELADA'
+       WHERE id = $1
+      `,
+      [r.id]
+    );
 
     await client.query('COMMIT');
     return { ok: true };
@@ -158,4 +164,30 @@ export async function cancelarReserva(bookingId) {
   } finally {
     client.release();
   }
+}
+
+/**
+ * Lista reservas de un usuario con info del paquete
+ */
+export async function getReservasPorUsuario(usuarioId) {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      r.codigo_reserva,
+      r.fecha_viaje,
+      r.adultos,
+      r.ninos,
+      r.total_usd,
+      COALESCE(r.estado, 'CONFIRMADA') AS estado,
+      p.titulo,
+      p.imagen
+    FROM reservas r
+    JOIN paquetes p ON r.paquete_id = p.id
+    WHERE r.usuario_id = $1
+    ORDER BY r.fecha_viaje DESC, r.id DESC
+    `,
+    [usuarioId]
+  );
+
+  return rows;
 }
