@@ -262,6 +262,8 @@ export async function crearPreReserva(req, res) {
  */
 // src/controllers/integracionController.js
 
+// src/controllers/integracionController.js
+
 export async function confirmarReserva(req, res) {
   try {
     const item = req.body?.item || null;
@@ -272,13 +274,13 @@ export async function confirmarReserva(req, res) {
     }
 
     const r = await crearReserva({
-      codigo:  String(item.codigo  || ''),
-      fecha:   String(item.fecha   || '').slice(0, 10),
+      codigo: String(item.codigo || ''),
+      fecha: String(item.fecha || '').slice(0, 10),
       adultos: Number(item.adultos || 0),
-      ninos:   Number(item.ninos   || 0),
-      origen:  'REST-INTEGRACION',
-      // 👇 NUEVO: guardamos el usuario
-      usuarioId: item.usuarioId ? Number(item.usuarioId) : null
+      ninos: Number(item.ninos || 0),
+
+      // ⬇⬇⬇ CAMBIA SOLO ESTA LÍNEA
+      origen: 'REST'   // máximo 10 caracteres, no rompe el varchar(10)
     });
 
     return res.status(201).json({
@@ -286,7 +288,7 @@ export async function confirmarReserva(req, res) {
       data: {
         bookingId: r.codigoReserva,
         estado: 'CONFIRMADA',
-        total:  r.total
+        total: r.total
       },
       _links: {
         self: {
@@ -294,7 +296,9 @@ export async function confirmarReserva(req, res) {
           method: 'POST'
         },
         cancelar: {
-          href: `${API_BASE}/paquetes/book/${encodeURIComponent(r.codigoReserva)}`,
+          href: `${API_BASE}/paquetes/book/${encodeURIComponent(
+            r.codigoReserva
+          )}`,
           method: 'DELETE'
         }
       }
@@ -303,6 +307,7 @@ export async function confirmarReserva(req, res) {
     return handleError(res, e);
   }
 }
+
 
 
 /**
