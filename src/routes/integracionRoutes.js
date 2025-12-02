@@ -6,8 +6,9 @@ const router = express.Router();
 
 // GET
 router.get('/paquetes/search',        C.buscarServicios);
-router.get('/paquetes/:id',           C.obtenerDetalleServicio);
+// 👇 MOVER ESTA ANTES de /:id
 router.get('/paquetes/availability',  C.verificarDisponibilidad);
+router.get('/paquetes/:id',           C.obtenerDetalleServicio);
 
 // POST
 router.post('/paquetes/quote',        C.cotizarReserva);
