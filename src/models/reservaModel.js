@@ -3,7 +3,9 @@ import { pool } from '../config/db.js';
 
 /**
  * Crea una reserva con control de stock y disponibilidad.
- * Retorna { ok, codigoReserva, total }
+ * Además genera la FACTURA + DETALLE_FACTURA.
+ *
+ * Retorna { ok, codigoReserva, total }  // total = subtotal sin IVA
  */
 export async function crearReserva({
   codigo,
@@ -11,7 +13,7 @@ export async function crearReserva({
   adultos = 1,
   ninos = 0,
   origen = 'REST',
-  usuarioId = null      // 👈 nuevo: guarda el dueño de la reserva
+  usuarioId = null
 }) {
   const client = await pool.connect();
   try {
@@ -28,7 +30,7 @@ export async function crearReserva({
     const solicitados = Number(adultos || 0) + Number(ninos || 0);
     if (solicitados <= 0) throw new Error('Cantidad inválida');
 
-    // 2) Asegurar fila disponibilidad
+    // 2) Asegurar fila disponibilidad (30 cupos por defecto)
     await client.query(
       `
       INSERT INTO disponibilidad (paquete_id, fecha, cupos_totales, cupos_reservados)
@@ -57,30 +59,32 @@ export async function crearReserva({
       throw new Error(`Stock insuficiente (${disponibles})`);
     }
 
-    // 4) Total $
+    // 4) Total $ (SIN IVA)
     const total =
       Number(adultos || 0) * Number(p.precio_adulto || 0) +
       Number(ninos || 0) * Number(p.precio_nino || 0);
 
-    // 5) Generar código de reserva
+    // 5) Generar código de reserva (ej: RES-20251204-4A5F)
     const code =
       'RES-' +
       new Date().toISOString().slice(0, 10).replace(/-/g, '') +
       '-' +
       Math.random().toString(36).slice(2, 6).toUpperCase();
 
-    // 6) Insert reserva (con usuario_id)
-    await client.query(
+    // 6) Insert reserva (con usuario_id) y obtener ID
+    const rIns = await client.query(
       `
       INSERT INTO reservas
-        (codigo_reserva, paquete_id, usuario_id, fecha_viaje, adultos, ninos, total_usd, origen)
+        (codigo_reserva, paquete_id, usuario_id, fecha_viaje,
+         adultos, ninos, total_usd, origen, estado, creado_en)
       VALUES
-        ($1, $2, $3, $4, $5, $6, $7, $8)
+        ($1,$2,$3,$4,$5,$6,$7,$8,'CONFIRMADA', NOW())
+      RETURNING id
       `,
       [
         code,
         p.id,
-        usuarioId, 
+        usuarioId,
         String(fecha),
         Number(adultos || 0),
         Number(ninos || 0),
@@ -88,6 +92,7 @@ export async function crearReserva({
         String(origen)
       ]
     );
+    const reservaId = rIns.rows[0].id;
 
     // 7) Descontar cupos
     await client.query(
@@ -99,7 +104,48 @@ export async function crearReserva({
       [solicitados, p.id, String(fecha)]
     );
 
+    // 8) CREAR FACTURA + DETALLE_FACTURA (IVA 15%)
+    const subtotal = total;
+    const iva = +(subtotal * 0.15).toFixed(2);
+    const totalFactura = +(subtotal + iva).toFixed(2);
+
+    const codFactura =
+      'FAC-' +
+      new Date().toISOString().slice(0, 10).replace(/-/g, '') +
+      '-' +
+      Math.random().toString(36).slice(2, 6).toUpperCase();
+
+    // Tabla: FACTURAS
+    const fRes = await client.query(
+      `
+      INSERT INTO facturas
+        (codigo_factura, reserva_id, fecha_emision,
+         subtotal, iva, total, metodo_pago, estado)
+      VALUES
+        ($1,$2,NOW(),$3,$4,$5,'WEB','EMITIDA')
+      RETURNING id
+      `,
+      [codFactura, reservaId, subtotal, iva, totalFactura]
+    );
+    const facturaId = fRes.rows[0].id;
+
+    // Tabla: DETALLE_FACTURA
+    const descripcion =
+      `${p.titulo} - Adultos ${adultos} · Niños ${ninos}`;
+    await client.query(
+      `
+      INSERT INTO detalle_factura
+        (factura_id, descripcion, cantidad, precio_unitario, total_linea)
+      VALUES
+        ($1,$2,$3,$4,$5)
+      `,
+      [facturaId, descripcion, solicitados || 1, subtotal / (solicitados || 1), subtotal]
+    );
+
+    // 9) Commit
     await client.query('COMMIT');
+
+    // total = subtotal (sin IVA), igual que antes para no romper el FRONT
     return { ok: true, codigoReserva: code, total };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -107,87 +153,4 @@ export async function crearReserva({
   } finally {
     client.release();
   }
-}
-
-/**
- * Cancela reserva, devuelve cupos.
- * Retorna { ok }
- */
-export async function cancelarReserva(bookingId) {
-  const id = String(bookingId || '').trim();
-  if (!id) throw new Error('bookingId requerido');
-
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-
-    // 1) Buscar reserva
-    const rRes = await client.query(
-      `
-      SELECT id, codigo_reserva, paquete_id, fecha_viaje, adultos, ninos
-        FROM reservas
-       WHERE codigo_reserva = $1
-       LIMIT 1
-      `,
-      [id]
-    );
-    const r = rRes.rows[0];
-    if (!r) throw new Error('Reserva no encontrada');
-
-    const solicitados = Number(r.adultos || 0) + Number(r.ninos || 0);
-
-    // 2) Devolver cupos
-    await client.query(
-      `
-      UPDATE disponibilidad
-         SET cupos_reservados = GREATEST(cupos_reservados - $1, 0)
-       WHERE paquete_id = $2 AND fecha = $3
-      `,
-      [solicitados, r.paquete_id, String(r.fecha_viaje)]
-    );
-
-    // 3) marcar como cancelada (si la columna existe)
-    await client.query(
-      `
-      UPDATE reservas
-         SET estado = 'CANCELADA'
-       WHERE id = $1
-      `,
-      [r.id]
-    );
-
-    await client.query('COMMIT');
-    return { ok: true };
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch {}
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-/**
- * Lista reservas de un usuario con info del paquete
- */
-export async function getReservasPorUsuario(usuarioId) {
-  const { rows } = await pool.query(
-    `
-    SELECT
-      r.codigo_reserva,
-      r.fecha_viaje,
-      r.adultos,
-      r.ninos,
-      r.total_usd,
-      COALESCE(r.estado, 'CONFIRMADA') AS estado,
-      p.titulo,
-      p.imagen
-    FROM reservas r
-    JOIN paquetes p ON r.paquete_id = p.id
-    WHERE r.usuario_id = $1
-    ORDER BY r.fecha_viaje DESC, r.id DESC
-    `,
-    [usuarioId]
-  );
-
-  return rows;
 }
