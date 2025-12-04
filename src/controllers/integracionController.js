@@ -264,49 +264,56 @@ export async function crearPreReserva(req, res) {
 
 // src/controllers/integracionController.js
 
+// src/controllers/integracionController.js
+import { crearReserva, cancelarReserva } from '../models/reservaModel.js';
+import { crearFacturaParaReserva } from '../models/facturaModel.js'; // 👈 nuevo
+
 export async function confirmarReserva(req, res) {
   try {
-    const item = req.body?.item || null;
+    const { item } = req.body;
     if (!item) {
-      return res
-        .status(400)
-        .json({ ok: false, error: 'item requerido' });
+      return res.status(400).json({ ok: false, error: 'Falta item en el body' });
     }
 
-    const r = await crearReserva({
-      codigo: String(item.codigo || ''),
-      fecha: String(item.fecha || '').slice(0, 10),
-      adultos: Number(item.adultos || 0),
-      ninos: Number(item.ninos || 0),
+    const {
+      codigo,
+      fecha,
+      adultos = 1,
+      ninos = 0,
+      usuarioId = null  // 👈 VIENE DEL FRONT
+    } = item;
 
-      // ⬇⬇⬇ CAMBIA SOLO ESTA LÍNEA
-      origen: 'REST'   // máximo 10 caracteres, no rompe el varchar(10)
+    if (!codigo || !fecha) {
+      return res.status(400).json({ ok: false, error: 'Faltan código o fecha' });
+    }
+
+    // 1) Crear reserva en DB (ya con usuario_id y descuento de stock)
+    const reserva = await crearReserva({
+      codigo,
+      fecha,
+      adultos,
+      ninos,
+      usuarioId,
+      origen: 'WEB'
     });
+
+    // 2) Crear factura + detalle_factura
+    await crearFacturaParaReserva(reserva);
 
     return res.status(201).json({
       ok: true,
       data: {
-        bookingId: r.codigoReserva,
-        estado: 'CONFIRMADA',
-        total: r.total
-      },
-      _links: {
-        self: {
-          href: `${API_BASE}/paquetes/book`,
-          method: 'POST'
-        },
-        cancelar: {
-          href: `${API_BASE}/paquetes/book/${encodeURIComponent(
-            r.codigoReserva
-          )}`,
-          method: 'DELETE'
-        }
+        bookingId: reserva.codigoReserva,
+        total: reserva.total_usd,
+        estado: reserva.estado || 'CONFIRMADA'
       }
     });
-  } catch (e) {
-    return handleError(res, e);
+  } catch (err) {
+    console.error('[confirmarReserva] error', err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 }
+
 
 
 
