@@ -3,13 +3,7 @@ import { pool } from '../config/db.js';
 
 /**
  * Crea una reserva con control de stock y disponibilidad.
- * Retorna:
- * {
- *   ok: true,
- *   codigoReserva: 'RES-...',
- *   total: <number>,
- *   reserva: <fila completa de la tabla reservas>
- * }
+ * Retorna { ok, codigoReserva, total, usuarioId, estado }
  */
 export async function crearReserva({
   codigo,
@@ -19,12 +13,13 @@ export async function crearReserva({
   origen = 'REST',
   usuarioId = null
 }) {
-  const client = await pool.connect();
+  console.log('[crearReserva] params =', { codigo, fecha, adultos, ninos, origen, usuarioId });
 
+  const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 1) Obtener paquete
+    // 1) Buscar paquete por código
     const pRes = await client.query(
       'SELECT * FROM paquetes WHERE codigo = $1 LIMIT 1',
       [String(codigo)]
@@ -32,11 +27,10 @@ export async function crearReserva({
     const p = pRes.rows[0];
     if (!p) throw new Error('Paquete no encontrado');
 
-    // 2) Validar cantidad solicitada
     const solicitados = Number(adultos || 0) + Number(ninos || 0);
     if (solicitados <= 0) throw new Error('Cantidad inválida');
 
-    // 3) Asegurar fila de disponibilidad (cupos_totales = 30 por defecto)
+    // 2) Asegurar fila de disponibilidad (30 cupos por defecto)
     await client.query(
       `
       INSERT INTO disponibilidad (paquete_id, fecha, cupos_totales, cupos_reservados)
@@ -46,7 +40,7 @@ export async function crearReserva({
       [p.id, String(fecha)]
     );
 
-    // 4) Bloquear fila de disponibilidad para este paquete/fecha
+    // 3) Leer y bloquear disponibilidad
     const { rows } = await client.query(
       `
       SELECT id, cupos_totales, cupos_reservados
@@ -65,32 +59,31 @@ export async function crearReserva({
       throw new Error(`Stock insuficiente (${disponibles})`);
     }
 
-    // 5) Calcular total
+    // 4) Calcular total
     const total =
       Number(adultos || 0) * Number(p.precio_adulto || 0) +
       Number(ninos || 0) * Number(p.precio_nino || 0);
 
-    // 6) Generar código de reserva
+    // 5) Generar código de reserva
     const code =
       'RES-' +
       new Date().toISOString().slice(0, 10).replace(/-/g, '') +
       '-' +
       Math.random().toString(36).slice(2, 6).toUpperCase();
 
-    // 7) Insertar reserva y devolver la fila completa
-    const rIns = await client.query(
+    // 6) Insertar reserva
+    const rInsert = await client.query(
       `
       INSERT INTO reservas
-        (codigo_reserva, paquete_id, usuario_id, fecha_viaje,
-         adultos, ninos, total_usd, origen)
+        (codigo_reserva, paquete_id, usuario_id, fecha_viaje, adultos, ninos, total_usd, origen, estado)
       VALUES
-        ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *
+        ($1, $2, $3, $4, $5, $6, $7, $8, 'CONFIRMADA')
+      RETURNING id
       `,
       [
         code,
         p.id,
-        usuarioId,            // 👈 aquí se asocia el usuario
+        usuarioId,                // 👈 AHÍ SE GRABA EL USUARIO
         String(fecha),
         Number(adultos || 0),
         Number(ninos || 0),
@@ -99,9 +92,9 @@ export async function crearReserva({
       ]
     );
 
-    const reserva = rIns.rows[0];
+    const reservaId = rInsert.rows[0].id;
 
-    // 8) Actualizar cupos reservados
+    // 7) Actualizar cupos reservados
     await client.query(
       `
       UPDATE disponibilidad
@@ -117,7 +110,9 @@ export async function crearReserva({
       ok: true,
       codigoReserva: code,
       total,
-      reserva       // 👈 se usa en el controlador para la factura
+      usuarioId,
+      estado: 'CONFIRMADA',
+      reservaId
     };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -128,19 +123,17 @@ export async function crearReserva({
 }
 
 /**
- * Cancela una reserva y devuelve los cupos a la disponibilidad.
- * Retorna { ok: true }
+ * Cancela reserva, devuelve cupos.
+ * Retorna { ok }
  */
 export async function cancelarReserva(bookingId) {
   const id = String(bookingId || '').trim();
   if (!id) throw new Error('bookingId requerido');
 
   const client = await pool.connect();
-
   try {
     await client.query('BEGIN');
 
-    // 1) Buscar reserva por código
     const rRes = await client.query(
       `
       SELECT id, codigo_reserva, paquete_id, fecha_viaje, adultos, ninos
@@ -155,7 +148,6 @@ export async function cancelarReserva(bookingId) {
 
     const solicitados = Number(r.adultos || 0) + Number(r.ninos || 0);
 
-    // 2) Devolver cupos a disponibilidad
     await client.query(
       `
       UPDATE disponibilidad
@@ -165,7 +157,6 @@ export async function cancelarReserva(bookingId) {
       [solicitados, r.paquete_id, String(r.fecha_viaje)]
     );
 
-    // 3) Marcar reserva como CANCELADA
     await client.query(
       `
       UPDATE reservas
@@ -186,8 +177,7 @@ export async function cancelarReserva(bookingId) {
 }
 
 /**
- * Lista reservas de un usuario con info del paquete.
- * Se usa para /api/v1/reservas/user/:id
+ * Lista reservas de un usuario con info del paquete
  */
 export async function getReservasPorUsuario(usuarioId) {
   const { rows } = await pool.query(

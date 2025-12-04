@@ -2,6 +2,7 @@
 import { listPaquetes, getPaqueteByCodigo } from '../models/paqueteModel.js';
 import { ensureAndGetDisponibilidad } from '../models/disponibilidadModel.js';
 import { crearReserva, cancelarReserva } from '../models/reservaModel.js';
+import { crearFacturaParaReserva } from '../models/facturaModel.js';
 
 // ✅ misma versión que en server.js
 const API_VERSION = 'v1';
@@ -57,7 +58,7 @@ export async function buscarServicios(req, res) {
     const min = req.query.minPrecio ? Number(req.query.minPrecio) : null;
     const max = req.query.maxPrecio ? Number(req.query.maxPrecio) : null;
 
-    const rows = (await listPaquetes()).map(p => {
+    const rows = (await listPaquetes()).map((p) => {
       const item = {
         id: String(p.codigo),
         name: p.titulo,
@@ -76,9 +77,10 @@ export async function buscarServicios(req, res) {
       };
     });
 
-    const data = rows.filter(s =>
-      (min === null || s.adultPrice >= min) &&
-      (max === null || s.adultPrice <= max)
+    const data = rows.filter(
+      (s) =>
+        (min === null || s.adultPrice >= min) &&
+        (max === null || s.adultPrice <= max)
     );
 
     return res.status(200).json({
@@ -147,9 +149,7 @@ export async function verificarDisponibilidad(req, res) {
 
     const p = await getPaqueteByCodigo(sku);
     if (!p) {
-      return res
-        .status(404)
-        .json({ ok: false, error: 'SKU inválido' });
+      return res.status(404).json({ ok: false, error: 'SKU inválido' });
     }
 
     const disp = await ensureAndGetDisponibilidad(p.id, inicio);
@@ -260,19 +260,15 @@ export async function crearPreReserva(req, res) {
  * POST /api/v1/integracion/paquetes/book
  * Confirma una reserva real + HATEOAS
  */
-// src/controllers/integracionController.js
-
-// src/controllers/integracionController.js
-
-// src/controllers/integracionController.js
-import { crearReserva, cancelarReserva } from '../models/reservaModel.js';
-import { crearFacturaParaReserva } from '../models/facturaModel.js'; // 👈 nuevo
-
 export async function confirmarReserva(req, res) {
   try {
-    const { item } = req.body;
+    console.log('[REST confirmarReserva] body =', req.body);
+
+    const item = req.body?.item;
     if (!item) {
-      return res.status(400).json({ ok: false, error: 'Falta item en el body' });
+      return res
+        .status(400)
+        .json({ ok: false, error: 'Falta item en el body' });
     }
 
     const {
@@ -284,8 +280,12 @@ export async function confirmarReserva(req, res) {
     } = item;
 
     if (!codigo || !fecha) {
-      return res.status(400).json({ ok: false, error: 'Faltan código o fecha' });
+      return res
+        .status(400)
+        .json({ ok: false, error: 'Faltan código o fecha' });
     }
+
+    console.log('[REST confirmarReserva] usuarioId =', usuarioId);
 
     // 1) Crear reserva en DB (ya con usuario_id y descuento de stock)
     const reserva = await crearReserva({
@@ -297,6 +297,8 @@ export async function confirmarReserva(req, res) {
       origen: 'WEB'
     });
 
+    console.log('[REST confirmarReserva] reserva creada =', reserva);
+
     // 2) Crear factura + detalle_factura
     await crearFacturaParaReserva(reserva);
 
@@ -304,18 +306,15 @@ export async function confirmarReserva(req, res) {
       ok: true,
       data: {
         bookingId: reserva.codigoReserva,
-        total: reserva.total_usd,
+        total: reserva.total,
         estado: reserva.estado || 'CONFIRMADA'
       }
     });
   } catch (err) {
     console.error('[confirmarReserva] error', err);
-    return res.status(500).json({ ok: false, error: err.message });
+    return handleError(res, err);
   }
 }
-
-
-
 
 /**
  * DELETE /api/v1/integracion/paquetes/book/:bookingId
