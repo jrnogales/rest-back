@@ -2,7 +2,10 @@
 import { listPaquetes, getPaqueteByCodigo } from '../models/paqueteModel.js';
 import { ensureAndGetDisponibilidad } from '../models/disponibilidadModel.js';
 import { crearReserva, cancelarReserva } from '../models/reservaModel.js';
-import { crearFacturaParaReserva, crearFacturaParaLote } from '../models/facturaModel.js';
+import {
+  crearFacturaParaReserva,
+  crearFacturaParaLote
+} from '../models/facturaModel.js';
 
 // ✅ misma versión que en server.js
 const API_VERSION = 'v1';
@@ -58,7 +61,7 @@ export async function buscarServicios(req, res) {
     const min = req.query.minPrecio ? Number(req.query.minPrecio) : null;
     const max = req.query.maxPrecio ? Number(req.query.maxPrecio) : null;
 
-    const rows = (await listPaquetes()).map(p => {
+    const rows = (await listPaquetes()).map((p) => {
       const item = {
         id: String(p.codigo),
         name: p.titulo,
@@ -77,9 +80,10 @@ export async function buscarServicios(req, res) {
       };
     });
 
-    const data = rows.filter(s =>
-      (min === null || s.adultPrice >= min) &&
-      (max === null || s.adultPrice <= max)
+    const data = rows.filter(
+      (s) =>
+        (min === null || s.adultPrice >= min) &&
+        (max === null || s.adultPrice <= max)
     );
 
     return res.status(200).json({
@@ -148,9 +152,7 @@ export async function verificarDisponibilidad(req, res) {
 
     const p = await getPaqueteByCodigo(sku);
     if (!p) {
-      return res
-        .status(404)
-        .json({ ok: false, error: 'SKU inválido' });
+      return res.status(404).json({ ok: false, error: 'SKU inválido' });
     }
 
     const disp = await ensureAndGetDisponibilidad(p.id, inicio);
@@ -259,14 +261,20 @@ export async function crearPreReserva(req, res) {
 
 /**
  * POST /api/v1/integracion/paquetes/book
- * - Si viene { items: [...] }  -> varias reservas + 1 sola factura
- * - Si viene { item: {...} }  -> 1 reserva + 1 factura (como antes)
+ *
+ * MODO CARRITO:
+ *   body = { items: [ { codigo, fecha, adultos, ninos, usuarioId }, ... ] }
+ *   → Crea varias reservas y UNA sola factura (crearFacturaParaLote).
+ *
+ * MODO SIMPLE:
+ *   body = { item: { codigo, fecha, adultos, ninos, usuarioId } }
+ *   → Crea una reserva y su factura individual (crearFacturaParaReserva).
  */
 export async function confirmarReserva(req, res) {
   try {
     const body = req.body || {};
 
-    // --- MODO CARRITO: varias reservas ---
+    // --- MODO CARRITO: varias reservas + 1 sola factura ---
     if (Array.isArray(body.items) && body.items.length > 0) {
       const items = body.items;
       const reservas = [];
@@ -299,24 +307,26 @@ export async function confirmarReserva(req, res) {
       }
 
       // 👉 UNA sola factura para todo el carrito
-      const codigos = reservas.map(r => r.codigoReserva);
+      const codigos = reservas.map((r) => r.codigoReserva);
       const factura = await crearFacturaParaLote(codigos);
 
       return res.status(201).json({
         ok: true,
         data: {
-          bookingId: factura.codigoFactura,   // código de la factura del lote
-          reservas: codigos,                  // códigos de las reservas
+          bookingId: factura.codigoFactura, // código de la factura del lote
+          reservas: codigos,                // códigos de las reservas
           total: +totalCarrito.toFixed(2),
           estado: 'CONFIRMADA'
         }
       });
     }
 
-    // --- MODO SIMPLE: lo que ya tenías ---
+    // --- MODO SIMPLE: una reserva + una factura ---
     const { item } = body;
     if (!item) {
-      return res.status(400).json({ ok: false, error: 'Falta item en el body' });
+      return res
+        .status(400)
+        .json({ ok: false, error: 'Falta item en el body' });
     }
 
     const {
@@ -324,11 +334,13 @@ export async function confirmarReserva(req, res) {
       fecha,
       adultos = 1,
       ninos = 0,
-      usuarioId = null  // 👈 VIENE DEL FRONT
+      usuarioId = null // 👈 VIENE DEL FRONT
     } = item;
 
     if (!codigo || !fecha) {
-      return res.status(400).json({ ok: false, error: 'Faltan código o fecha' });
+      return res
+        .status(400)
+        .json({ ok: false, error: 'Faltan código o fecha' });
     }
 
     console.log('[REST] confirmarReserva item =', item);
