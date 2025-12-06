@@ -2,17 +2,23 @@
 import { pool } from '../config/db.js';
 
 /**
- * Factura para UNA sola reserva
+ * Crea o actualiza una factura para UNA reserva.
+ *
+ * Si viene reservaInfo.loteId ⇒ se intenta reutilizar la misma factura
+ * usando ese código como codigo_factura (una sola factura por carrito).
+ *
+ * Si NO viene loteId ⇒ se comporta como antes: una factura por reserva.
  */
 export async function crearFacturaParaReserva(reservaInfo = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // 1) Buscar la reserva en la BD (por id o por código)
+    // 1) Buscar la reserva en la BD (por id, por código o por objeto que viene de crearReserva)
     let reservaRow;
 
     if (reservaInfo.reservaId) {
+      // Caso: nos pasan el id numérico
       const r = await client.query(
         `
         SELECT r.*, p.titulo
@@ -25,6 +31,7 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
       );
       reservaRow = r.rows[0];
     } else if (reservaInfo.codigoReserva) {
+      // Caso: nos pasan el código 'RES-...'
       const r = await client.query(
         `
         SELECT r.*, p.titulo
@@ -42,49 +49,123 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
       throw new Error('Reserva para facturar no encontrada');
     }
 
-    // 2) Totales
-    const subtotal = Number(
+    // 2) Subtotal de ESTA reserva (sin IVA)
+    const lineaSubtotal = Number(
       reservaRow.total_usd ??
       reservaInfo.total ??
       0
     );
-    const iva = +(subtotal * 0.15).toFixed(2);  // 15%
-    const total = +(subtotal + iva).toFixed(2);
 
-    // 3) Código factura
-    const codFac =
-      'FAC-' +
-      new Date().toISOString().slice(0, 10).replace(/-/g, '') +
-      '-' +
-      Math.random().toString(36).slice(2, 6).toUpperCase();
+    if (!Number.isFinite(lineaSubtotal)) {
+      throw new Error('Total de reserva inválido para facturación');
+    }
 
-    // 4) FACTURA
-    const facRes = await client.query(
-      `
-      INSERT INTO facturas
-        (codigo_factura, reserva_id, fecha_emision,
-         subtotal, iva, total, metodo_pago, estado)
-      VALUES
-        ($1, $2, NOW(), $3, $4, $5, $6, $7)
-      RETURNING id
-      `,
-      [
-        codFac,
-        reservaRow.id,
-        subtotal,
-        iva,
-        total,
-        'WEB',
-        'EMITIDA'
-      ]
-    );
-    const facturaId = facRes.rows[0].id;
-
-    // 5) DETALLE (1 línea resumen)
+    // 3) Descripción para detalle_factura
     const descripcion =
       (reservaRow.titulo || 'Paquete turístico') +
       ` - Adultos ${reservaRow.adultos || 0} · Niños ${reservaRow.ninos || 0}`;
 
+    // 4) Lógica de factura:
+    //    - si viene loteId => intentamos reutilizar factura con ese codigo_factura
+    //    - si no viene => generamos código único como antes
+    const loteId = reservaInfo.loteId ? String(reservaInfo.loteId) : null;
+
+    let facturaId;
+    let codigoFactura;
+
+    if (loteId) {
+      // 🔗 Modo "carrito": usar un mismo codigo_factura para varias reservas
+      codigoFactura = loteId;
+
+      // 4.1 Buscar si ya existe esa factura
+      const fPrev = await client.query(
+        `
+        SELECT id, subtotal
+          FROM facturas
+         WHERE codigo_factura = $1
+         LIMIT 1
+        `,
+        [codigoFactura]
+      );
+
+      if (fPrev.rows.length > 0) {
+        // ✅ Ya existe la factura del carrito → solo sumamos esta línea
+        facturaId = fPrev.rows[0].id;
+        const subtotalAnt = Number(fPrev.rows[0].subtotal || 0);
+        const nuevoSubtotal = subtotalAnt + lineaSubtotal;
+        const nuevoIva = +(nuevoSubtotal * 0.15).toFixed(2);
+        const nuevoTotal = +(nuevoSubtotal + nuevoIva).toFixed(2);
+
+        await client.query(
+          `
+          UPDATE facturas
+             SET subtotal = $1,
+                 iva      = $2,
+                 total    = $3
+           WHERE id = $4
+          `,
+          [nuevoSubtotal, nuevoIva, nuevoTotal, facturaId]
+        );
+      } else {
+        // 🆕 Primera reserva del carrito → creamos la factura
+        const iva = +(lineaSubtotal * 0.15).toFixed(2);
+        const total = +(lineaSubtotal + iva).toFixed(2);
+
+        const facRes = await client.query(
+          `
+          INSERT INTO facturas
+            (codigo_factura, reserva_id, fecha_emision,
+             subtotal, iva, total, metodo_pago, estado)
+          VALUES
+            ($1, $2, NOW(), $3, $4, $5, $6, $7)
+          RETURNING id
+          `,
+          [
+            codigoFactura,
+            reservaRow.id,
+            lineaSubtotal,
+            iva,
+            total,
+            'WEB',
+            'EMITIDA'
+          ]
+        );
+        facturaId = facRes.rows[0].id;
+      }
+    } else {
+      // 🧾 Modo clásico: una factura por reserva
+      const iva = +(lineaSubtotal * 0.15).toFixed(2);
+      const total = +(lineaSubtotal + iva).toFixed(2);
+
+      codigoFactura =
+        'FAC-' +
+        new Date().toISOString().slice(0, 10).replace(/-/g, '') +
+        '-' +
+        Math.random().toString(36).slice(2, 6).toUpperCase();
+
+      const facRes = await client.query(
+        `
+        INSERT INTO facturas
+          (codigo_factura, reserva_id, fecha_emision,
+           subtotal, iva, total, metodo_pago, estado)
+        VALUES
+          ($1, $2, NOW(), $3, $4, $5, $6, $7)
+        RETURNING id
+        `,
+        [
+          codigoFactura,
+          reservaRow.id,
+          lineaSubtotal,
+          iva,
+          total,
+          'WEB',
+          'EMITIDA'
+        ]
+      );
+      facturaId = facRes.rows[0].id;
+    }
+
+    // 5) DETALLE (una línea para esta reserva)
     await client.query(
       `
       INSERT INTO detalle_factura
@@ -96,7 +177,7 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
         facturaId,
         descripcion,
         1,
-        subtotal
+        lineaSubtotal
       ]
     );
 
@@ -105,7 +186,7 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
     return {
       ok: true,
       facturaId,
-      codigoFactura: codFac
+      codigoFactura
     };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
@@ -118,105 +199,31 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
 /**
  * Factura para TODO un carrito (varias reservas)
  * Recibe un arreglo de CÓDIGOS de reserva: ['RES-...', 'RES-...']
+ *
+ * Crea / reutiliza UNA sola factura usando un mismo loteId/codigoFactura.
+ * (Es básicamente un wrapper que llama crearFacturaParaReserva varias veces).
  */
 export async function crearFacturaParaLote(codigosReserva = []) {
   if (!Array.isArray(codigosReserva) || codigosReserva.length === 0) {
     throw new Error('Se requieren códigos de reserva para facturar el lote');
   }
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
+  // Usamos un código de factura común para todo el lote
+  const loteId =
+    'FAC-LOTE-' +
+    new Date().toISOString().slice(0, 10).replace(/-/g, '') +
+    '-' +
+    Math.random().toString(36).slice(2, 6).toUpperCase();
 
-    // 1) Traer todas las reservas del lote con sus paquetes
-    const { rows: reservas } = await client.query(
-      `
-      SELECT r.*, p.titulo
-        FROM reservas r
-        JOIN paquetes p ON r.paquete_id = p.id
-       WHERE r.codigo_reserva = ANY($1::text[])
-      `,
-      [codigosReserva]
-    );
+  let lastResult = null;
 
-    if (reservas.length === 0) {
-      throw new Error('Reservas para facturar no encontradas');
-    }
-
-    // 2) Totales del carrito
-    const subtotal = reservas.reduce(
-      (s, r) => s + Number(r.total_usd || 0),
-      0
-    );
-    const iva = +(subtotal * 0.15).toFixed(2);
-    const total = +(subtotal + iva).toFixed(2);
-
-    // 3) Código de factura
-    const codFac =
-      'FAC-' +
-      new Date().toISOString().slice(0, 10).replace(/-/g, '') +
-      '-' +
-      Math.random().toString(36).slice(2, 6).toUpperCase();
-
-    // Tomamos la primera reserva como "principal" para el campo reserva_id
-    const reservaPrincipal = reservas[0];
-
-    // 4) FACTURA
-    const facRes = await client.query(
-      `
-      INSERT INTO facturas
-        (codigo_factura, reserva_id, fecha_emision,
-         subtotal, iva, total, metodo_pago, estado)
-      VALUES
-        ($1, $2, NOW(), $3, $4, $5, $6, $7)
-      RETURNING id
-      `,
-      [
-        codFac,
-        reservaPrincipal.id,
-        subtotal,
-        iva,
-        total,
-        'WEB',
-        'EMITIDA'
-      ]
-    );
-    const facturaId = facRes.rows[0].id;
-
-    // 5) DETALLES: una línea por cada reserva del carrito
-    for (const r of reservas) {
-      const desc =
-        (r.titulo || 'Paquete turístico') +
-        ` - Adultos ${r.adultos || 0} · Niños ${r.ninos || 0} ` +
-        `(Reserva ${r.codigo_reserva})`;
-
-      await client.query(
-        `
-        INSERT INTO detalle_factura
-          (factura_id, descripcion, cantidad, precio_unitario)
-        VALUES
-          ($1, $2, $3, $4)
-        `,
-        [
-          facturaId,
-          desc,
-          1,
-          Number(r.total_usd || 0)
-        ]
-      );
-    }
-
-    await client.query('COMMIT');
-
-    return {
-      ok: true,
-      facturaId,
-      codigoFactura: codFac
-    };
-  } catch (err) {
-    try { await client.query('ROLLBACK'); } catch {}
-    throw err;
-  } finally {
-    client.release();
+  for (const codigoReserva of codigosReserva) {
+    lastResult = await crearFacturaParaReserva({
+      codigoReserva,
+      loteId
+    });
   }
+
+  // lastResult lleva facturaId y codigoFactura (que será = loteId)
+  return lastResult;
 }
