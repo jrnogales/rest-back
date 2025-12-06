@@ -3,12 +3,7 @@ import { pool } from '../config/db.js';
 
 /**
  * Crea una factura + detalle_factura para una reserva ya creada.
- * - reservaInfo puede traer: { reservaId, codigoReserva, total }
- * - Usa solamente las columnas que EXISTEN en tus tablas:
- *   facturas: id, codigo_factura, reserva_id, fecha_emision,
- *             subtotal, iva, total, metodo_pago, estado
- *   detalle_factura: id, factura_id, descripcion,
- *                    cantidad, precio_unitario, total_linea
+ * Usa solo las columnas que existen en la BD.
  */
 export async function crearFacturaParaReserva(reservaInfo = {}) {
   const client = await pool.connect();
@@ -64,7 +59,7 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
       '-' +
       Math.random().toString(36).slice(2, 6).toUpperCase();
 
-    // 4) Insertar en FACTURAS (sin columnas inventadas)
+    // 4) Insertar en FACTURAS
     const facRes = await client.query(
       `
       INSERT INTO facturas
@@ -80,13 +75,15 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
         subtotal,
         iva,
         total,
-        'WEB',        // método de pago
-        'EMITIDA'     // estado
+        'WEB',
+        'EMITIDA'
       ]
     );
     const facturaId = facRes.rows[0].id;
 
-    // 5) Insertar detalle_factura (una línea resumen)
+    // 5) Insertar detalle_factura
+    //    OJO: NO enviamos total_linea,
+    //    la BD lo calcula sola (por eso daba el error).
     const descripcion =
       (reservaRow.titulo || 'Paquete turístico') +
       ` - Adultos ${reservaRow.adultos || 0} · Niños ${reservaRow.ninos || 0}`;
@@ -94,16 +91,15 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
     await client.query(
       `
       INSERT INTO detalle_factura
-        (factura_id, descripcion, cantidad, precio_unitario, total_linea)
+        (factura_id, descripcion, cantidad, precio_unitario)
       VALUES
-        ($1, $2, $3, $4, $5)
+        ($1, $2, $3, $4)
       `,
       [
         facturaId,
         descripcion,
         1,          // cantidad (1 ítem resumen)
-        subtotal,   // precio_unitario
-        subtotal    // total_linea
+        subtotal    // precio_unitario
       ]
     );
 
