@@ -141,7 +141,7 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
         'FAC-' +
         new Date().toISOString().slice(0, 10).replace(/-/g, '') +
         '-' +
-        Math.random().toString(36).slice(2, 6).toUpperCase();
+        Math.random().toString(36).slice(2, 6).toUpperCase(); // 18 chars máx.
 
       const facRes = await client.query(
         `
@@ -201,16 +201,16 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
  * Recibe un arreglo de CÓDIGOS de reserva: ['RES-...', 'RES-...']
  *
  * Crea / reutiliza UNA sola factura usando un mismo loteId/codigoFactura.
- * (Es básicamente un wrapper que llama crearFacturaParaReserva varias veces).
  */
 export async function crearFacturaParaLote(codigosReserva = []) {
   if (!Array.isArray(codigosReserva) || codigosReserva.length === 0) {
     throw new Error('Se requieren códigos de reserva para facturar el lote');
   }
 
-  // Usamos un código de factura común para todo el lote
+  // ⚠️ MUY IMPORTANTE: que mida < 20 caracteres por la columna varchar(20)
+  // FL- + AAAAMMDD + - + XXXX  => 3 + 8 + 1 + 4 = 16
   const loteId =
-    'FAC-LOTE-' +
+    'FL-' +
     new Date().toISOString().slice(0, 10).replace(/-/g, '') +
     '-' +
     Math.random().toString(36).slice(2, 6).toUpperCase();
