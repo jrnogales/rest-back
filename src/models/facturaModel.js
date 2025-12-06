@@ -1,79 +1,121 @@
 // src/models/facturaModel.js
 import { pool } from '../config/db.js';
 
-function generarCodigoFactura() {
-  const hoy = new Date();
-  const yyyy = hoy.getFullYear();
-  const mm = String(hoy.getMonth() + 1).padStart(2, '0');
-  const dd = String(hoy.getDate()).padStart(2, '0');
-  const suf = Math.random().toString(36).substring(2, 6).toUpperCase();
-  return `FAC-${yyyy}${mm}${dd}-${suf}`;
-}
-
 /**
- * Crea una factura + detalle_factura a partir de una reserva
- * reserva = row devuelta por crearReserva()
+ * Crea una factura + detalle_factura para una reserva ya creada.
+ * - reservaInfo puede traer: { reservaId, codigoReserva, total }
+ * - Usa solamente las columnas que EXISTEN en tus tablas:
+ *   facturas: id, codigo_factura, reserva_id, fecha_emision,
+ *             subtotal, iva, total, metodo_pago, estado
+ *   detalle_factura: id, factura_id, descripcion,
+ *                    cantidad, precio_unitario, total_linea
  */
-export async function crearFacturaParaReserva(reserva) {
+export async function crearFacturaParaReserva(reservaInfo = {}) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    const {
-      id: reservaId,
-      paquete_id,
-      adultos,
-      ninos,
-      total_usd
-    } = reserva;
+    // 1) Buscar la reserva en la BD (por id o por código)
+    let reservaRow;
 
-    // Nombre del paquete
-    const pRes = await client.query(
-      'SELECT nombre FROM paquetes WHERE id = $1',
-      [paquete_id]
+    if (reservaInfo.reservaId) {
+      const r = await client.query(
+        `
+        SELECT r.*, p.titulo
+          FROM reservas r
+          JOIN paquetes p ON r.paquete_id = p.id
+         WHERE r.id = $1
+         LIMIT 1
+        `,
+        [reservaInfo.reservaId]
+      );
+      reservaRow = r.rows[0];
+    } else if (reservaInfo.codigoReserva) {
+      const r = await client.query(
+        `
+        SELECT r.*, p.titulo
+          FROM reservas r
+          JOIN paquetes p ON r.paquete_id = p.id
+         WHERE r.codigo_reserva = $1
+         LIMIT 1
+        `,
+        [reservaInfo.codigoReserva]
+      );
+      reservaRow = r.rows[0];
+    }
+
+    if (!reservaRow) {
+      throw new Error('Reserva para facturar no encontrada');
+    }
+
+    // 2) Calcular totales (usa total_usd de la reserva)
+    const subtotal = Number(
+      reservaRow.total_usd ??
+      reservaInfo.total ??
+      0
     );
-    const nombrePaquete = pRes.rows[0]?.nombre || 'Paquete';
-
-    const codigoFactura = generarCodigoFactura();
-    const subtotal = Number(total_usd || 0);
-    const iva = +(subtotal * 0.15).toFixed(2);   // mismo IVA que en tu tabla
+    const iva = +(subtotal * 0.15).toFixed(2);  // 15%
     const total = +(subtotal + iva).toFixed(2);
 
-    const fRes = await client.query(
-      `INSERT INTO facturas
-         (codigo_factura, reserva_id, fecha_emision,
-          subtotal, iva, total, metodo_pago, estado)
-       VALUES
-         ($1,$2, NOW(), $3,$4,$5,$6,$7)
-       RETURNING id, codigo_factura`,
-      [codigoFactura, reservaId, subtotal, iva, total, 'WEB', 'EMITIDA']
+    // 3) Generar código de factura
+    const codFac =
+      'FAC-' +
+      new Date().toISOString().slice(0, 10).replace(/-/g, '') +
+      '-' +
+      Math.random().toString(36).slice(2, 6).toUpperCase();
+
+    // 4) Insertar en FACTURAS (sin columnas inventadas)
+    const facRes = await client.query(
+      `
+      INSERT INTO facturas
+        (codigo_factura, reserva_id, fecha_emision,
+         subtotal, iva, total, metodo_pago, estado)
+      VALUES
+        ($1, $2, NOW(), $3, $4, $5, $6, $7)
+      RETURNING id
+      `,
+      [
+        codFac,
+        reservaRow.id,
+        subtotal,
+        iva,
+        total,
+        'WEB',        // método de pago
+        'EMITIDA'     // estado
+      ]
     );
+    const facturaId = facRes.rows[0].id;
 
-    const facturaId = fRes.rows[0].id;
-
-    const descripcion = `${nombrePaquete} - Adultos ${adultos} · Niños ${ninos}`;
-    const cantidad = (Number(adultos || 0) + Number(ninos || 0)) || 1;
-    const precioUnitario = subtotal / cantidad;
+    // 5) Insertar detalle_factura (una línea resumen)
+    const descripcion =
+      (reservaRow.titulo || 'Paquete turístico') +
+      ` - Adultos ${reservaRow.adultos || 0} · Niños ${reservaRow.ninos || 0}`;
 
     await client.query(
-      `INSERT INTO detalle_factura
-         (factura_id, descripcion, cantidad, precio_unitario, total_linea)
-       VALUES
-         ($1,$2,$3,$4,$5)`,
-      [facturaId, descripcion, cantidad, precioUnitario, subtotal]
+      `
+      INSERT INTO detalle_factura
+        (factura_id, descripcion, cantidad, precio_unitario, total_linea)
+      VALUES
+        ($1, $2, $3, $4, $5)
+      `,
+      [
+        facturaId,
+        descripcion,
+        1,          // cantidad (1 ítem resumen)
+        subtotal,   // precio_unitario
+        subtotal    // total_linea
+      ]
     );
 
     await client.query('COMMIT');
 
     return {
-      id: facturaId,
-      codigoFactura,
-      subtotal,
-      iva,
-      total
+      ok: true,
+      facturaId,
+      codigoFactura: codFac
     };
   } catch (err) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch {}
     throw err;
   } finally {
     client.release();
