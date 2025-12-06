@@ -259,11 +259,63 @@ export async function crearPreReserva(req, res) {
 
 /**
  * POST /api/v1/integracion/paquetes/book
- * Confirma una reserva real + HATEOAS
+ * - Si viene { items: [...] }  -> varias reservas + 1 sola factura
+ * - Si viene { item: {...} }  -> 1 reserva + 1 factura (como antes)
  */
 export async function confirmarReserva(req, res) {
   try {
-    const { item } = req.body;
+    const body = req.body || {};
+
+    // --- MODO CARRITO: varias reservas ---
+    if (Array.isArray(body.items) && body.items.length > 0) {
+      const items = body.items;
+      const reservas = [];
+      let totalCarrito = 0;
+
+      for (const it of items) {
+        const {
+          codigo,
+          fecha,
+          adultos = 1,
+          ninos = 0,
+          usuarioId = null
+        } = it || {};
+
+        if (!codigo || !fecha) {
+          throw new Error('Cada item necesita código y fecha');
+        }
+
+        const r = await crearReserva({
+          codigo,
+          fecha,
+          adultos,
+          ninos,
+          usuarioId,
+          origen: 'WEB'
+        });
+
+        reservas.push(r);
+        totalCarrito += Number(r.total || r.total_usd || 0);
+      }
+
+      // 🔹 ya adaptaste crearFacturaParaReserva para aceptar un array de reservas
+      await crearFacturaParaReserva(reservas);
+
+      const codigos = reservas.map(r => r.codigoReserva);
+
+      return res.status(201).json({
+        ok: true,
+        data: {
+          bookingId: codigos[0] || null, // puedes cambiarlo si quieres un código de lote
+          reservas: codigos,
+          total: +totalCarrito.toFixed(2),
+          estado: 'CONFIRMADA'
+        }
+      });
+    }
+
+    // --- MODO SIMPLE: lo que ya tenías ---
+    const { item } = body;
     if (!item) {
       return res.status(400).json({ ok: false, error: 'Falta item en el body' });
     }
@@ -292,7 +344,7 @@ export async function confirmarReserva(req, res) {
       origen: 'WEB'
     });
 
-    // 2) Crear factura + detalle_factura
+    // 2) Crear factura + detalle_factura (una sola reserva)
     await crearFacturaParaReserva(reserva);
 
     return res.status(201).json({
