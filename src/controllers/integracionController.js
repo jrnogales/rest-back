@@ -2,7 +2,7 @@
 import { listPaquetes, getPaqueteByCodigo } from '../models/paqueteModel.js';
 import { ensureAndGetDisponibilidad } from '../models/disponibilidadModel.js';
 import { crearReserva, cancelarReserva } from '../models/reservaModel.js';
-import { crearFacturaParaReserva } from '../models/facturaModel.js';
+import { crearFacturaParaReserva, crearFacturaParaLote } from '../models/facturaModel.js';
 
 // ✅ misma versión que en server.js
 const API_VERSION = 'v1';
@@ -298,16 +298,15 @@ export async function confirmarReserva(req, res) {
         totalCarrito += Number(r.total || r.total_usd || 0);
       }
 
-      // 🔹 ya adaptaste crearFacturaParaReserva para aceptar un array de reservas
-      await crearFacturaParaReserva(reservas);
-
+      // 👉 UNA sola factura para todo el carrito
       const codigos = reservas.map(r => r.codigoReserva);
+      const factura = await crearFacturaParaLote(codigos);
 
       return res.status(201).json({
         ok: true,
         data: {
-          bookingId: codigos[0] || null, // puedes cambiarlo si quieres un código de lote
-          reservas: codigos,
+          bookingId: factura.codigoFactura,   // código de la factura del lote
+          reservas: codigos,                  // códigos de las reservas
           total: +totalCarrito.toFixed(2),
           estado: 'CONFIRMADA'
         }
