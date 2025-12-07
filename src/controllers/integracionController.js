@@ -52,6 +52,68 @@ function buildPaqueteLinks(codigo) {
   };
 }
 
+// 🌐 Pago con banco externo
+const BANK_BASE_URL = 'http://mibanca.runasp.net/api/transacciones'; // usa cuentaDestino 299
+
+/**
+ * POST /api/v1/integracion/pagos
+ * Body: { cuentaOrigen, monto }
+ */
+export async function procesarPago(req, res) {
+  try {
+    const { cuentaOrigen, monto } = req.body || {};
+
+    if (!cuentaOrigen || !monto) {
+      return res
+        .status(400)
+        .json({ ok: false, error: 'cuentaOrigen y monto son requeridos' });
+    }
+
+    const payload = {
+      cuentaOrigen: String(cuentaOrigen),
+      cuentaDestino: '299',              // 👈 tu cuenta destino fija
+      tipo: 'C',                         // C = crédito en la cuenta destino
+      monto: Number(monto),
+      referencia: 'CUENCA-TRAVEL',
+      canal: 'WEB',
+      descripcion: 'Pago paquetes turísticos'
+    };
+
+    // Node 20 ya tiene fetch global, no hace falta import
+    const resp = await fetch(BANK_BASE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    let data = null;
+    try {
+      data = await resp.json();
+    } catch {
+      data = null;
+    }
+
+    if (!resp.ok) {
+      const msg =
+        data?.mensaje ||
+        data?.error ||
+        `Error al procesar pago en el banco (HTTP ${resp.status})`;
+
+      console.error('[procesarPago] error banco:', msg, data);
+      return res.status(502).json({ ok: false, error: msg });
+    }
+
+    // Aquí devolvemos lo que el banco responda
+    return res.status(201).json({
+      ok: true,
+      data
+    });
+  } catch (err) {
+    console.error('[procesarPago] error interno:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+}
+
 /**
  * GET /api/v1/integracion/paquetes/search
  * Lista paquetes (con filtro opcional por precio) + HATEOAS

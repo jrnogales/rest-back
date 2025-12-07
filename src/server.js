@@ -5,7 +5,6 @@ import integracionRouter from './routes/integracionRoutes.js';
 import { pool } from './config/db.js';
 import paquetesIntegracionRoutes from './routes/paquetesIntegracionRoutes.js';
 
-
 // ⚠️ Temporal y sólo para desbloquear certificados self-signed
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
@@ -29,9 +28,8 @@ app.use(`/api/${API_VERSION}/reservas`, reservasRoutes);
 
 app.use('/api/v2/paquetes', paquetesIntegracionRoutes);
 
-app.use('/api/v1/integracion', integracionRoutes);
-
-
+// ❌ ESTA LÍNEA SOBRABA Y ROMPE (integracionRoutes no existe):
+// app.use('/api/v1/integracion', integracionRoutes);
 
 // ✅ Compatibilidad hacia atrás (si alguien usa /api/integracion)
 app.use('/api/integracion', (req, res) => {

@@ -21,5 +21,7 @@ router.delete('/paquetes/book/:bookingId', C.cancelarReservaIntegracion);
 // Compatibilidad con lo que ya tenías (POST /cancel)
 router.post('/paquetes/cancel',       C.cancelarReservaIntegracion);
 
-router.post('/pagos', procesarPago);
+// 🔹 AQUÍ ESTABA EL ERROR: faltaba el prefijo C.
+router.post('/pagos', C.procesarPago);
+
 export default router;
