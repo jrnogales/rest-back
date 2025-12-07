@@ -21,4 +21,5 @@ router.delete('/paquetes/book/:bookingId', C.cancelarReservaIntegracion);
 // Compatibilidad con lo que ya tenías (POST /cancel)
 router.post('/paquetes/cancel',       C.cancelarReservaIntegracion);
 
+router.post('/pagos', procesarPago);
 export default router;

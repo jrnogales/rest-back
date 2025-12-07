@@ -29,6 +29,9 @@ app.use(`/api/${API_VERSION}/reservas`, reservasRoutes);
 
 app.use('/api/v2/paquetes', paquetesIntegracionRoutes);
 
+app.use('/api/v1/integracion', integracionRoutes);
+
+
 
 // ✅ Compatibilidad hacia atrás (si alguien usa /api/integracion)
 app.use('/api/integracion', (req, res) => {
