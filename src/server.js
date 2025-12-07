@@ -3,6 +3,8 @@ import express from 'express';
 import cors from 'cors';
 import integracionRouter from './routes/integracionRoutes.js';
 import { pool } from './config/db.js';
+import paquetesIntegracionRoutes from './routes/paquetesIntegracionRoutes.js';
+
 
 // ⚠️ Temporal y sólo para desbloquear certificados self-signed
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -24,6 +26,9 @@ app.use(`/api/${API_VERSION}/auth`, authRoutes);
 // --- RESERVAS DEL USUARIO (NUEVO) ---
 import reservasRoutes from './routes/reservasRoutes.js';
 app.use(`/api/${API_VERSION}/reservas`, reservasRoutes);
+
+app.use('/api/v2/paquetes', paquetesIntegracionRoutes);
+
 
 // ✅ Compatibilidad hacia atrás (si alguien usa /api/integracion)
 app.use('/api/integracion', (req, res) => {
