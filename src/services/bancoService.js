@@ -1,5 +1,4 @@
 // src/services/bancoService.js
-import fetch from 'node-fetch';
 
 //
 // =============================================
