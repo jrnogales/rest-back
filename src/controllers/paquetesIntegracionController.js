@@ -530,3 +530,98 @@ export async function buscarDatosReserva(req, res) {
     client.release();
   }
 }
+
+/* ============================================================
+   8) POST /api/v2/paquetes/cancelar
+      body: { id_reserva }
+      -> cancelarReservaPaquete()
+   ============================================================ */
+export async function cancelarReservaPaquete(req, res) {
+  const client = await pool.connect();
+  try {
+    const { id_reserva } = req.body || {};
+    const codigo = String(id_reserva || "").trim();
+
+    if (!codigo) {
+      return res
+        .status(400)
+        .json({ exito: false, mensaje: "id_reserva es obligatorio" });
+    }
+
+    await client.query("BEGIN");
+
+    // Buscamos por código de reserva (RES-...) o por id numérico
+    const rRes = await client.query(
+      `SELECT r.id,
+              r.codigo_reserva,
+              r.fecha_viaje,
+              r.adultos,
+              r.ninos,
+              r.total_usd,
+              r.paquete_id,
+              r.estado
+         FROM reservas r
+        WHERE r.codigo_reserva = $1
+           OR r.id::text       = $1
+        LIMIT 1`,
+      [codigo]
+    );
+
+    if (!rRes.rows.length) {
+      await client.query("ROLLBACK");
+      return res
+        .status(404)
+        .json({ exito: false, mensaje: "Reserva no encontrada" });
+    }
+
+    const r = rRes.rows[0];
+
+    // Si ya estaba cancelada, no hacemos nada de stock
+    if (r.estado === "CANCELADA") {
+      await client.query("ROLLBACK");
+      return res.json({
+        exito: false,
+        valor_pagado: Number(r.total_usd || 0),
+        mensaje: "La reserva ya estaba cancelada",
+      });
+    }
+
+    const cupos = Number(r.adultos || 0) + Number(r.ninos || 0);
+
+    // Devolvemos cupos en disponibilidad
+    await client.query(
+      `UPDATE disponibilidad
+          SET cupos_reservados = GREATEST(cupos_reservados - $1, 0)
+        WHERE paquete_id = $2
+          AND fecha       = $3`,
+      [cupos, r.paquete_id, r.fecha_viaje]
+    );
+
+    // Marcamos la reserva como CANCELADA
+    await client.query(
+      `UPDATE reservas
+          SET estado = 'CANCELADA'
+        WHERE id = $1`,
+      [r.id]
+    );
+
+    await client.query("COMMIT");
+
+    // Lo que el Booking Bus necesita
+    return res.json({
+      exito: true,
+      valor_pagado: Number(r.total_usd || 0),
+    });
+  } catch (err) {
+    console.error("cancelarReservaPaquete:", err);
+    try {
+      await client.query("ROLLBACK");
+    } catch {}
+    return res
+      .status(500)
+      .json({ exito: false, mensaje: "Error interno al cancelar" });
+  } finally {
+    client.release();
+  }
+}
+

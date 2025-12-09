@@ -7,7 +7,8 @@ import {
   reservarPaquete,
   crearUsuarioExterno,
   emitirFacturaPaquete,
-  buscarDatosReserva
+  buscarDatosReserva,
+  cancelarReservaPaquete
 } from '../controllers/paquetesIntegracionController.js';
 
 const router = Router();
@@ -32,5 +33,9 @@ router.post('/invoices', emitirFacturaPaquete);
 
 // GET datos reserva por código
 router.get('/:id/reserva', buscarDatosReserva);
+
+// POST cancelar reserva (para Booking Bus)
+router.post('/cancelar', cancelarReservaPaquete);
+
 
 export default router;
