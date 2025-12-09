@@ -123,7 +123,7 @@ export async function crearReserva({
 }
 
 
-/**
+/**dasdasd
  * Cancela reserva, devuelve cupos.
  * Retorna { ok }
  */
