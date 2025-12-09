@@ -122,6 +122,7 @@ export async function crearReserva({
   }
 }
 
+
 /**
  * Cancela reserva, devuelve cupos.
  * Retorna { ok }
@@ -148,13 +149,26 @@ export async function cancelarReserva(bookingId) {
 
     const solicitados = Number(r.adultos || 0) + Number(r.ninos || 0);
 
+    // 🧠 FORMATEAMOS fecha_viaje A 'YYYY-MM-DD' PARA EL WHERE
+    const fechaRaw = r.fecha_viaje;
+    let fechaSql;
+
+    if (fechaRaw instanceof Date) {
+      // Date → 'YYYY-MM-DD'
+      fechaSql = fechaRaw.toISOString().slice(0, 10);
+    } else {
+      const s = String(fechaRaw);
+      const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      fechaSql = m ? `${m[1]}-${m[2]}-${m[3]}` : s.slice(0, 10);
+    }
+
     await client.query(
       `
       UPDATE disponibilidad
          SET cupos_reservados = GREATEST(cupos_reservados - $1, 0)
        WHERE paquete_id = $2 AND fecha = $3
       `,
-      [solicitados, r.paquete_id, String(r.fecha_viaje)]
+      [solicitados, r.paquete_id, fechaSql]  // 👈 AQUÍ USAMOS fechaSql
     );
 
     await client.query(
@@ -175,6 +189,7 @@ export async function cancelarReserva(bookingId) {
     client.release();
   }
 }
+
 
 /**
  * Lista reservas de un usuario con info del paquete
