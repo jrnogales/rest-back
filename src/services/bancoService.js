@@ -9,23 +9,14 @@ const BANK_BASE_URL =
   process.env.BANK_BASE_URL || 'http://mibanca.runasp.net/api';
 
 // CUENTA DE LA AGENCIA DONDE SE RECIBE EL PAGO
-// 👉 AQUÍ ESTÁ LA CORRECCIÓN: 299
+// 👉 TU CUENTA EMPRESA
 const CUENTA_AGENCIA =
   process.env.BANK_CUENTA_AGENCIA || '299';
 
-
 //
 // =============================================
-// PAGO AL BANCO
+// PAGO AL BANCO (cliente → agencia 299)
 // =============================================
-//
-// body esperado por el servicio:
-// {
-//   "cuenta_origen": "123",
-//   "cuenta_destino": "299",
-//   "monto": 50.00
-// }
-//
 export async function realizarPagoBanco({ cuentaOrigen, monto }) {
   if (!cuentaOrigen) {
     throw new Error('cuentaOrigen es requerida');
@@ -59,4 +50,45 @@ export async function realizarPagoBanco({ cuentaOrigen, monto }) {
   }
 
   return data; // ejemplo: { id: 10, cuenta_origen: "...", cuenta_destino: "299", monto: 50 }
+}
+
+//
+// =============================================
+// REEMBOLSO (agencia 299 → cliente)
+// =============================================
+export async function reembolsarPagoBanco({ cuentaDestino, monto }) {
+  if (!cuentaDestino) {
+    throw new Error('cuentaDestino es requerida');
+  }
+  if (!monto || Number(monto) <= 0) {
+    throw new Error('monto inválido');
+  }
+
+  const numMonto = Number(monto);
+
+  const body = {
+    // Ahora el origen ES la agencia (299)
+    cuenta_origen: String(CUENTA_AGENCIA),
+    // y el destino es la cuenta del cliente (ej. 301)
+    cuenta_destino: String(cuentaDestino),
+    monto: numMonto
+  };
+
+  const url = `${BANK_BASE_URL}/transacciones`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      data?.mensaje || `Error del banco (${response.status})`
+    );
+  }
+
+  return data; // { id, cuenta_origen: "299", cuenta_destino: "301", monto }
 }
