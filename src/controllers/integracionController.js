@@ -496,11 +496,11 @@ export async function cancelarConReembolso(req, res) {
         r.id              AS reserva_id,
         r.codigo_reserva,
         r.fecha_viaje,
-        COALESCE(r.total_usd, 0) AS total_reserva,
+        COALESCE(r.total_usd, 0)         AS total_reserva,
         COALESCE(r.estado, 'CONFIRMADA') AS estado_reserva,
         f.id              AS factura_id,
-        COALESCE(f.total, 0) AS total_factura,
-        COALESCE(f.estado, 'EMITIDA') AS estado_factura
+        COALESCE(f.total, 0)             AS total_factura,
+        COALESCE(f.estado, 'EMITIDA')    AS estado_factura
       FROM reservas r
       LEFT JOIN facturas f ON f.reserva_id = r.id
       WHERE r.codigo_reserva = $1
@@ -517,20 +517,34 @@ export async function cancelarConReembolso(req, res) {
       });
     }
 
-    // 2) Política de 24 horas (no cancelar el MISMO día de la reserva)
-    const hoy = new Date();               // hoy local
+    // 2) Validar estados actuales
+    if (row.estado_reserva === 'CANCELADA') {
+      return res.status(409).json({
+        ok: false,
+        error: 'La reserva ya está cancelada'
+      });
+    }
+
+    if (row.factura_id && row.estado_factura === 'ANULADA') {
+      return res.status(409).json({
+        ok: false,
+        error: 'La factura asociada ya está anulada'
+      });
+    }
+
+    // 3) Política de tiempo (24 horas antes del viaje)
+    const hoy = new Date();
     const y = hoy.getFullYear();
     const m = hoy.getMonth();
     const d = hoy.getDate();
-    const inicioHoy = new Date(y, m, d, 0, 0, 0, 0); // 00:00 de hoy
+    const inicioHoy = new Date(y, m, d, 0, 0, 0, 0); // 00:00 hoy
 
-    const fechaViaje = new Date(row.fecha_viaje);    // viene como date de PG
+    const fechaViaje = new Date(row.fecha_viaje);
     const y2 = fechaViaje.getFullYear();
     const m2 = fechaViaje.getMonth();
     const d2 = fechaViaje.getDate();
     const inicioViaje = new Date(y2, m2, d2, 0, 0, 0, 0);
 
-    // Si la fecha del viaje es hoy o anterior → NO se permite cancelar
     if (inicioViaje.getTime() <= inicioHoy.getTime()) {
       return res.status(400).json({
         ok: false,
@@ -540,26 +554,31 @@ export async function cancelarConReembolso(req, res) {
       });
     }
 
-    // 3) Monto a devolver
+    // 4) Monto a devolver
+    //    Si hay factura → devolvemos lo que se cobró (total_factura).
+    //    Si no tiene factura (caso raro) → usamos total_reserva.
     const monto = Number(row.total_factura || row.total_reserva || 0);
+
     if (!monto || !Number.isFinite(monto) || monto <= 0) {
       return res.status(400).json({
         ok: false,
-        error: 'No hay monto válido para reembolsar'
+        error: 'No hay un monto válido para reembolsar'
       });
     }
 
-    // 4) Hacer primero el reembolso bancario (299 → cuentaDestino)
+    // 5) Reembolso bancario (inverso al pago original)
+    //    Pago original: realizarPagoBanco({ cuentaOrigen, monto }) → cliente → 299
+    //    Reembolso:     reembolsarPagoBanco({ cuentaDestino, monto }) → 299 → cliente
     const pagoBanco = await reembolsarPagoBanco({
       cuentaDestino,
       monto
     });
 
-    // 5) Actualizar BD (reserva + disponibilidad + factura)
-    //    - usamos la lógica de cancelarReserva que ya devuelve cupos
+    // 6) Actualizar la reserva y la disponibilidad (devuelve stock)
+    //    reutilizamos la lógica de modelo cancelarReserva
     await cancelarReserva(codigo);
 
-    //    - marcar factura como ANULADA (si existe)
+    // 7) Marcar factura como ANULADA (si existe)
     if (row.factura_id) {
       await pool.query(
         `
@@ -571,6 +590,7 @@ export async function cancelarConReembolso(req, res) {
       );
     }
 
+    // 8) Respuesta final
     return res.status(200).json({
       ok: true,
       bookingId: codigo,
