@@ -26,10 +26,12 @@ app.use(`/api/${API_VERSION}/auth`, authRoutes);
 import reservasRoutes from './routes/reservasRoutes.js';
 app.use(`/api/${API_VERSION}/reservas`, reservasRoutes);
 
+// --- PAQUETES V2 ---
 app.use('/api/v2/paquetes', paquetesIntegracionRoutes);
 
-// ❌ ESTA LÍNEA SOBRABA Y ROMPE (integracionRoutes no existe):
-// app.use('/api/v1/integracion', integracionRoutes);
+// 🔹 ADMIN (reservas, facturas, usuarios)
+import adminApiRoutes from './routes/adminApiRoutes.js';
+app.use(`/api/${API_VERSION}`, adminApiRoutes);
 
 // ✅ Compatibilidad hacia atrás (si alguien usa /api/integracion)
 app.use('/api/integracion', (req, res) => {
