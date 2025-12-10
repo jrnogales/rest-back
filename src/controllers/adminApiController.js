@@ -200,8 +200,9 @@ export async function actualizarUsuarioRolEstado(req, res) {
 
     const { rol, estado } = req.body || {};
 
-    // normalizamos valores permitidos
-    const nuevoRol = (rol === 'admin') ? 'admin' : 'user';
+    const nuevoRol =
+      (rol === 'admin') ? 'admin' : 'user';
+
     const nuevoEstado =
       (estado === 'inactivo' || estado === 'Inactivo') ? 'inactivo' : 'activo';
 

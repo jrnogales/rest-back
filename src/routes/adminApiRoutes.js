@@ -6,6 +6,7 @@ import {
   obtenerFacturaPorId,
   obtenerDetalleFactura,
   listarUsuariosAdmin,
+  actualizarUsuarioRolEstado   // 👈 IMPORTAMOS LA NUEVA FUNCIÓN
 } from '../controllers/adminApiController.js';
 
 const router = express.Router();
@@ -20,5 +21,6 @@ router.get('/facturas/:id/detalle', obtenerDetalleFactura);
 
 // Usuarios (admin)
 router.get('/usuarios', listarUsuariosAdmin);
+router.put('/usuarios/:id/rol', actualizarUsuarioRolEstado);  // 👈 NUEVA RUTA PUT
 
 export default router;
