@@ -2,6 +2,33 @@
 import { pool } from '../config/db.js';
 
 /**
+ * GET /api/v1/paquetes
+ * Lista TODOS los paquetes para el panel admin
+ */
+export async function listarPaquetesAdmin(req, res) {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        id,
+        codigo,
+        titulo,
+        descripcion,
+        imagen,
+        precio_adulto,
+        precio_nino,
+        estado
+      FROM paquetes
+      ORDER BY id
+    `);
+
+    return res.json({ ok: true, data: rows });
+  } catch (err) {
+    console.error('[listarPaquetesAdmin] error:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+}
+
+/**
  * POST /api/v1/paquetes
  * Crea un nuevo paquete
  */
@@ -23,7 +50,6 @@ export async function crearPaquete(req, res) {
       });
     }
 
-    // nunca negativos
     const precioAdulto = Math.max(0, Number(precio_adulto || 0));
     const precioNino   = Math.max(0, Number(precio_nino   || 0));
 
@@ -196,8 +222,7 @@ export async function toggleEstadoPaquete(req, res) {
       return res.status(404).json({ ok: false, error: 'Paquete no encontrado' });
     }
 
-    // Volver al panel admin
-    return res.redirect('/admin/paquetes');
+    return res.json({ ok: true, data: { estado: rows[0].estado } });
   } catch (err) {
     console.error('[toggleEstadoPaquete] error:', err);
     return res.status(500).json({ ok: false, error: err.message });

@@ -1,6 +1,7 @@
 // src/routes/adminPaquetesRoutes.js
 import express from 'express';
 import {
+  listarPaquetesAdmin,
   crearPaquete,
   actualizarPaquete,
   eliminarPaquete,
@@ -9,13 +10,16 @@ import {
 
 const router = express.Router();
 
+// Listar paquetes (ADMIN)
+router.get('/', listarPaquetesAdmin);
+
 // Crear paquete
 router.post('/', crearPaquete);
 
 // Actualizar paquete
 router.put('/:id', actualizarPaquete);
 
-// Eliminar paquete (si lo sigues usando en algún lado)
+// Eliminar paquete
 router.delete('/:id', eliminarPaquete);
 
 // Activar / Inactivar paquete
