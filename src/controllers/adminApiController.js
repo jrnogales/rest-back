@@ -186,3 +186,43 @@ export async function listarUsuariosAdmin(req, res) {
     return res.status(500).json({ ok: false, error: err.message });
   }
 }
+
+/**
+ * PUT /api/v1/usuarios/:id/rol
+ * Actualiza rol y estado de un usuario (para el panel admin)
+ */
+export async function actualizarUsuarioRolEstado(req, res) {
+  try {
+    const id = Number(req.params.id);
+    if (!id) {
+      return res.status(400).json({ ok: false, error: 'id inválido' });
+    }
+
+    const { rol, estado } = req.body || {};
+
+    // normalizamos valores permitidos
+    const nuevoRol = (rol === 'admin') ? 'admin' : 'user';
+    const nuevoEstado =
+      (estado === 'inactivo' || estado === 'Inactivo') ? 'inactivo' : 'activo';
+
+    const { rows } = await pool.query(
+      `
+      UPDATE usuarios
+         SET rol    = $1,
+             estado = $2
+       WHERE id = $3
+       RETURNING id, nombre, apellido, email, rol, cedula, telefono, estado
+      `,
+      [nuevoRol, nuevoEstado, id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Usuario no encontrado' });
+    }
+
+    return res.json({ ok: true, data: rows[0] });
+  } catch (err) {
+    console.error('[ADMIN] actualizarUsuarioRolEstado error:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+}
