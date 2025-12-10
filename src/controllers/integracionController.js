@@ -338,52 +338,61 @@ export async function confirmarReserva(req, res) {
   try {
     const body = req.body || {};
 
-    // --- MODO CARRITO: varias reservas + 1 sola factura ---
-    if (Array.isArray(body.items) && body.items.length > 0) {
-      const items = body.items;
-      const reservas = [];
-      let totalCarrito = 0;
+    // --- MODO CARRITO: varias reservas, CADA UNA con su factura ---
+if (Array.isArray(body.items) && body.items.length > 0) {
+  const items = body.items;
+  const reservas = [];
+  let totalCarrito = 0;
+  let ultimaFacturaCodigo = null;
 
-      for (const it of items) {
-        const {
-          codigo,
-          fecha,
-          adultos = 1,
-          ninos = 0,
-          usuarioId = null
-        } = it || {};
+  for (const it of items) {
+    const {
+      codigo,
+      fecha,
+      adultos = 1,
+      ninos = 0,
+      usuarioId = null
+    } = it || {};
 
-        if (!codigo || !fecha) {
-          throw new Error('Cada item necesita código y fecha');
-        }
-
-        const r = await crearReserva({
-          codigo,
-          fecha,
-          adultos,
-          ninos,
-          usuarioId,
-          origen: 'WEB'
-        });
-
-        reservas.push(r);
-        totalCarrito += Number(r.total || r.total_usd || 0);
-      }
-
-      // 👉 UNA sola factura para todo el carrito
-      const codigos = reservas.map((r) => r.codigoReserva);
-      const factura = await crearFacturaParaLote(codigos);
-
-      return res.status(201).json({
-        ok: true,
-        data: {
-          bookingId: factura.codigoFactura, // código de la factura del lote
-          reservas: codigos,                // códigos de las reservas
-          total: +totalCarrito.toFixed(2),
-          estado: 'CONFIRMADA'
-        }
-      });
+    if (!codigo || !fecha) {
+      throw new Error('Cada item necesita código y fecha');
     }
+
+    // 1) Crear la reserva
+    const r = await crearReserva({
+      codigo,
+      fecha,
+      adultos,
+      ninos,
+      usuarioId,
+      origen: 'WEB'
+    });
+
+    // 2) Crear FACTURA INDIVIDUAL para ESTA reserva
+    const fac = await crearFacturaParaReserva({
+      codigoReserva: r.codigoReserva
+    });
+
+    ultimaFacturaCodigo = fac.codigoFactura; // nos guardamos el código de la última
+
+    reservas.push(r);
+    totalCarrito += Number(r.total || r.total_usd || 0);
+  }
+
+  // Esto se usa solo para mostrar algo en el comprobante del carrito
+  const referencia = ultimaFacturaCodigo || reservas[0]?.codigoReserva || 'CARRITO';
+
+  return res.status(201).json({
+    ok: true,
+    data: {
+      bookingId: referencia,
+      reservas: reservas.map(r => r.codigoReserva),
+      total: +totalCarrito.toFixed(2),
+      estado: 'CONFIRMADA'
+    }
+  });
+}
+
 
     // --- MODO SIMPLE: una reserva + una factura ---
     const { item } = body;
