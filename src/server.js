@@ -4,6 +4,8 @@ import cors from 'cors';
 import integracionRouter from './routes/integracionRoutes.js';
 import { pool } from './config/db.js';
 import paquetesIntegracionRoutes from './routes/paquetesIntegracionRoutes.js';
+import adminPaquetesRoutes from './routes/adminPaquetesRoutes.js';
+
 
 // ⚠️ Temporal y sólo para desbloquear certificados self-signed
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -32,6 +34,10 @@ app.use('/api/v2/paquetes', paquetesIntegracionRoutes);
 // 🔹 ADMIN (reservas, facturas, usuarios)
 import adminApiRoutes from './routes/adminApiRoutes.js';
 app.use(`/api/${API_VERSION}`, adminApiRoutes);
+
+// --- PAQUETES ADMIN (crear/editar/eliminar) ---
+app.use(`/api/${API_VERSION}/paquetes`, adminPaquetesRoutes);
+
 
 // ✅ Compatibilidad hacia atrás (si alguien usa /api/integracion)
 app.use('/api/integracion', (req, res) => {
