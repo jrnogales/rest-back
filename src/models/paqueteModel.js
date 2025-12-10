@@ -1,7 +1,7 @@
-﻿// src/models/paqueteModel.js
-import { pool } from '../config/db.js';
+﻿import { pool } from '../config/db.js';
 
 // 🔹 Lista pública de paquetes (solo activos)
+//    Si estado es NULL lo tratamos como 'activo' por compatibilidad
 export async function listPaquetes() {
   const { rows } = await pool.query(`
     SELECT
@@ -14,16 +14,15 @@ export async function listPaquetes() {
       precio_nino,
       estado
     FROM paquetes
-    WHERE estado = 'activo'        -- 👈 solo se muestran los activos
+    WHERE COALESCE(estado, 'activo') = 'activo'
     ORDER BY id
   `);
   return rows;
 }
 
 // 🔹 Un paquete por código (para detalle, etc.)
-export async function getPaqueteByCodigo(codigo) {
-  const { rows } = await pool.query(
-    `
+export async function listPaquetes() {
+  const { rows } = await pool.query(`
     SELECT
       id,
       codigo,
@@ -34,10 +33,8 @@ export async function getPaqueteByCodigo(codigo) {
       precio_nino,
       estado
     FROM paquetes
-    WHERE codigo = $1
-    LIMIT 1
-    `,
-    [codigo]
-  );
-  return rows[0] || null;
+    WHERE COALESCE(estado, 'activo') = 'activo'
+    ORDER BY id
+  `);
+  return rows;
 }

@@ -31,10 +31,10 @@ export async function crearPaquete(req, res) {
       `
       INSERT INTO paquetes
         (codigo, titulo, descripcion, imagen,
-         precio_adulto, precio_nino, stock)
-      VALUES ($1,$2,$3,$4,$5,$6,30)
+         precio_adulto, precio_nino, stock, estado)
+      VALUES ($1,$2,$3,$4,$5,$6,30,'activo')
       RETURNING id, codigo, titulo, descripcion, imagen,
-                precio_adulto, precio_nino
+                precio_adulto, precio_nino, estado
       `,
       [codigo, titulo, descripcion, imagen, precioAdulto, precioNino]
     );
@@ -92,7 +92,7 @@ export async function actualizarPaquete(req, res) {
              precio_nino   = $6
        WHERE id = $7
        RETURNING id, codigo, titulo, descripcion, imagen,
-                 precio_adulto, precio_nino
+                 precio_adulto, precio_nino, estado
       `,
       [codigo, titulo, descripcion, imagen, precioAdulto, precioNino, id]
     );
@@ -132,7 +132,6 @@ export async function eliminarPaquete(req, res) {
   try {
     await client.query('BEGIN');
 
-    // Igual que en tu código SOAP: limpiar dependencias básicas
     await client.query(
       'DELETE FROM disponibilidad WHERE paquete_id = $1',
       [id]
@@ -166,5 +165,41 @@ export async function eliminarPaquete(req, res) {
     });
   } finally {
     client.release();
+  }
+}
+
+/**
+ * POST /api/v1/paquetes/:id/toggle
+ * Cambia estado activo <-> inactivo
+ */
+export async function toggleEstadoPaquete(req, res) {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ ok: false, error: 'id requerido' });
+    }
+
+    const { rows } = await pool.query(
+      `
+      UPDATE paquetes
+         SET estado = CASE
+                        WHEN estado = 'activo' THEN 'inactivo'
+                        ELSE 'activo'
+                      END
+       WHERE id = $1
+       RETURNING estado;
+      `,
+      [id]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Paquete no encontrado' });
+    }
+
+    // Volver al panel admin
+    return res.redirect('/admin/paquetes');
+  } catch (err) {
+    console.error('[toggleEstadoPaquete] error:', err);
+    return res.status(500).json({ ok: false, error: err.message });
   }
 }
