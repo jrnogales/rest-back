@@ -1,69 +1,75 @@
 ﻿// src/server.js
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
+
 import integracionRouter from './routes/integracionRoutes.js';
-import { pool } from './config/db.js';
 import paquetesIntegracionRoutes from './routes/paquetesIntegracionRoutes.js';
 import adminPaquetesRoutes from './routes/adminPaquetesRoutes.js';
+import adminApiRoutes from './routes/adminApiRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import reservasRoutes from './routes/reservasRoutes.js';
 
+import { pools } from './config/db.js';
 
-// ⚠️ Temporal y sólo para desbloquear certificados self-signed
+// ⚠️ Temporal (si tu banco o DB usan self-signed)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
-// ✅ versión actual de la API
 const API_VERSION = 'v1';
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
 
-// ✅ Rutas versionadas: /api/v1/integracion/...
+// v1 integracion
 app.use(`/api/${API_VERSION}/integracion`, integracionRouter);
 
-// --- AUTH ---
-import authRoutes from './routes/authRoutes.js';
+// auth
 app.use(`/api/${API_VERSION}/auth`, authRoutes);
 
-// --- RESERVAS DEL USUARIO (NUEVO) ---
-import reservasRoutes from './routes/reservasRoutes.js';
+// reservas por usuario
 app.use(`/api/${API_VERSION}/reservas`, reservasRoutes);
 
-// --- PAQUETES V2 ---
+// booking bus v2
 app.use('/api/v2/paquetes', paquetesIntegracionRoutes);
 
-// 🔹 ADMIN (reservas, facturas, usuarios)
-import adminApiRoutes from './routes/adminApiRoutes.js';
+// admin api
 app.use(`/api/${API_VERSION}`, adminApiRoutes);
 
-// --- PAQUETES ADMIN (crear/editar/eliminar) ---
+// admin paquetes
 app.use(`/api/${API_VERSION}/paquetes`, adminPaquetesRoutes);
 
-
-// ✅ Compatibilidad hacia atrás (si alguien usa /api/integracion)
+// compatibilidad
 app.use('/api/integracion', (req, res) => {
   const nuevaRuta = `/api/${API_VERSION}/integracion${req.url}`;
-  return res.redirect(308, nuevaRuta); // 308: redirección permanente
+  return res.redirect(308, nuevaRuta);
 });
-
-const PORT = Number(process.env.PORT || 3000);
-const HOST = '0.0.0.0';
 
 app.get('/', (_req, res) => {
   res.json({ ok: true, service: 'rest-integracion-backend', version: API_VERSION });
 });
 
-// 🔍 Endpoint de debug para probar la DB
+// Debug: prueba cada DB
 app.get('/__debug/db', async (_req, res) => {
   try {
-    const r = await pool.query('SELECT 1 as ok');
-    res.json({ ok: true, db: r.rows[0] });
+    const results = {};
+    for (const [name, pool] of Object.entries(pools)) {
+      const r = await pool.query('SELECT 1 as ok');
+      results[name] = r.rows[0].ok;
+    }
+    res.json({ ok: true, dbs: results });
   } catch (e) {
     console.error('[DB PING ERROR]', e);
     res.status(500).json({ ok:false, error: e.message });
   }
 });
 
+const PORT = Number(process.env.PORT || 3000);
+const HOST = '0.0.0.0';
+
 app.listen(PORT, HOST, () => {
   const base = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
-  console.log(`REST Integración escuchando en ${base}`);
+  console.log(`Backend escuchando en ${base}`);
 });

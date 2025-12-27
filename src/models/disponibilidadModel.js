@@ -1,60 +1,52 @@
 ﻿// src/models/disponibilidadModel.js
-import { pool } from '../config/db.js';
+import { pools } from '../config/db.js';
+const pool = pools.reservas;
 
 /**
- * Asegura que exista la fila de disponibilidad (crea si no existe)
- * y la devuelve. Útil para verificar stock antes de reservar.
- *
- * @param {number} paqueteId
- * @param {string} fecha - 'YYYY-MM-DD'
- * @returns {Promise<{id:number, paquete_id:number, fecha:string, cupos_totales:number, cupos_reservados:number} | null>}
+ * En DB separada, disponibilidad NO debe depender de paquete_id (porque paquetes está en otra DB).
+ * Usaremos paquete_codigo (string).
  */
-export async function ensureAndGetDisponibilidad(paqueteId, fecha) {
+export async function ensureAndGetDisponibilidad(paqueteCodigo, fecha) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    // Crea la fila si no existe (30 cupos por defecto)
     await client.query(
       `
-      INSERT INTO disponibilidad (paquete_id, fecha, cupos_totales, cupos_reservados)
+      INSERT INTO disponibilidad (paquete_codigo, fecha, cupos_totales, cupos_reservados)
       VALUES ($1, $2, 30, 0)
-      ON CONFLICT (paquete_id, fecha) DO NOTHING
+      ON CONFLICT (paquete_codigo, fecha) DO NOTHING
       `,
-      [paqueteId, String(fecha)]
+      [String(paqueteCodigo), String(fecha)]
     );
 
-    // Lee la disponibilidad actual
     const { rows } = await client.query(
       `
-      SELECT id, paquete_id, fecha, cupos_totales, cupos_reservados
+      SELECT id, paquete_codigo, fecha, cupos_totales, cupos_reservados
         FROM disponibilidad
-       WHERE paquete_id = $1 AND fecha = $2
+       WHERE paquete_codigo = $1 AND fecha = $2
       `,
-      [paqueteId, String(fecha)]
+      [String(paqueteCodigo), String(fecha)]
     );
 
     await client.query('COMMIT');
     return rows[0] || null;
-  } catch (err) {
+  } catch (e) {
     try { await client.query('ROLLBACK'); } catch {}
-    throw err;
+    throw e;
   } finally {
     client.release();
   }
 }
 
-/**
- * Solo obtiene la fila (no crea si falta)
- */
-export async function getDisponibilidad(paqueteId, fecha) {
+export async function getDisponibilidad(paqueteCodigo, fecha) {
   const { rows } = await pool.query(
     `
-    SELECT id, paquete_id, fecha, cupos_totales, cupos_reservados
+    SELECT id, paquete_codigo, fecha, cupos_totales, cupos_reservados
       FROM disponibilidad
-     WHERE paquete_id = $1 AND fecha = $2
+     WHERE paquete_codigo = $1 AND fecha = $2
     `,
-    [paqueteId, String(fecha)]
+    [String(paqueteCodigo), String(fecha)]
   );
   return rows[0] || null;
 }

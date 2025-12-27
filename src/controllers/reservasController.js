@@ -10,14 +10,9 @@ export async function listarPorUsuario(req, res) {
 
     const reservas = await getReservasPorUsuario(id);
 
-    return res.json({
-      ok: true,
-      data: reservas,
-    });
+    return res.json({ ok: true, data: reservas });
   } catch (e) {
     console.error("[REST reservas] Error:", e);
-    return res
-      .status(500)
-      .json({ ok: false, error: e.message || "Error interno" });
+    return res.status(500).json({ ok: false, error: e.message || "Error interno" });
   }
 }
