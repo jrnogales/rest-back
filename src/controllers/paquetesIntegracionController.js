@@ -1,12 +1,19 @@
 // src/controllers/paquetesIntegracionController.js
 import { pools } from '../config/db.js';
 import { ensureAndGetDisponibilidad } from '../models/disponibilidadModel.js';
-import { crearReserva, getReservaPorCodigo, cancelarReserva as cancelarReservaCore } from '../models/reservaModel.js';
+import {
+  crearReserva,
+  getReservaPorCodigo,
+  cancelarReserva as cancelarReservaCore
+} from '../models/reservaModel.js';
 import { upsertUserByEmail } from '../models/usuarioModel.js';
 import { crearFacturaParaReserva, getFacturaByReservaId } from '../models/facturaModel.js';
 
 const poolPaquetes = pools.paquetes;
 const poolReservas = pools.reservas;
+
+// ✅ URL pública real del backend desplegado en Render
+const PUBLIC_BASE_URL = 'https://rest-back-xnjm.onrender.com';
 
 // ================== Utils ==================
 function brief(txt = '', len = 140) {
@@ -182,7 +189,7 @@ export async function reservarPaquete(req, res) {
     const adultos = turistas.filter(t => t.tipo === 'adulto' || !t.tipo).length || 1;
     const ninos = turistas.filter(t => t.tipo === 'nino').length || 0;
 
-    // 1) upsert usuario en DB usuarios (microservicio lógico)
+    // 1) upsert usuario en DB usuarios
     const user = await upsertUserByEmail({
       nombre: email,
       apellido: null,
@@ -250,13 +257,13 @@ export async function emitirFacturaPaquete(req, res) {
     }
 
     // Creamos factura en DB facturas, leyendo reserva desde DB reservas
-    // Importante: requiere el ajuste en facturaModel para respetar reservaInfo.total
     const result = await crearFacturaParaReserva({
       codigoReserva: String(id_reserva),
       total: Number(valor_pagado)
     });
 
-    const uri_factura = `https://backend-cuenca.onrender.com/admin/facturas/${result.codigoFactura}`;
+    // ✅ Link de factura usando TU backend real
+    const uri_factura = `${PUBLIC_BASE_URL}/admin/facturas/${result.codigoFactura}`;
 
     return res.json({ url_factura: uri_factura });
   } catch (err) {
@@ -277,13 +284,14 @@ export async function buscarDatosReserva(req, res) {
     if (!r) return res.status(404).json({ error: 'Reserva no encontrada' });
 
     const f = await getFacturaByReservaId(r.id);
+
     const uri_factura = f
-      ? `https://backend-cuenca.onrender.com/admin/facturas/${f.codigo_factura}`
+      ? `${PUBLIC_BASE_URL}/admin/facturas/${f.codigo_factura}`
       : null;
 
     return res.json({
       id_paquete: r.paquete_codigo,
-      correo: null, // si lo necesitas exacto, se compone con DB usuarios (no es obligatorio para el bus)
+      correo: null, // opcional
       fecha_inicio: r.fecha_viaje,
       duracion: 1,
       tipo_actividad: 'Paquete turístico',

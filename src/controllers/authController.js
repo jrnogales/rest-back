@@ -6,10 +6,11 @@ import { findUserByEmail, createUser, findUserById } from '../models/usuarioMode
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
 const COOKIE_OPTIONS = {
   httpOnly: true,
-  secure: false,     // en producción Render → true
+  secure: process.env.NODE_ENV === 'production', // ✅ Render = true
   sameSite: 'lax',
-  maxAge: 1000 * 60 * 60 * 24 * 7 // 7 días
+  maxAge: 1000 * 60 * 60 * 24 * 7
 };
+
 
 export async function login(req, res) {
   try {

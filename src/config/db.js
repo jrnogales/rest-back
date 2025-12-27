@@ -21,6 +21,9 @@ export const pools = {
   usuarios: makePool(process.env.DATABASE_URL_USUARIOS, 'DATABASE_URL_USUARIOS'),
 };
 
+// ✅ ALIAS por compatibilidad (si un archivo viejo sigue usando { pool })
+export const pool = pools.reservas;
+
 // helper por compatibilidad (si alguna vez necesitas cerrar todo)
 export async function closeAllPools() {
   await Promise.all(Object.values(pools).map(p => p.end().catch(() => {})));

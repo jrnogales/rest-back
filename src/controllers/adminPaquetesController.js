@@ -68,7 +68,11 @@ export async function eliminarPaquete(req, res) {
 
     // 2) borrar disponibilidad y carrito (en sus DB)
     await pools.reservas.query(`DELETE FROM disponibilidad WHERE paquete_codigo=$1`, [String(codigo)]).catch(()=>{});
-    await pools.carrito.query(`DELETE FROM carrito WHERE paquete_id::text=$1 OR paquete_codigo=$1`, [String(codigo)]).catch(()=>{});
+    await pools.carrito.query(
+  `DELETE FROM carrito WHERE paquete_codigo=$1`,
+  [String(codigo)]
+).catch(()=>{});
+
 
     // 3) borrar paquete en DB paquetes
     const ok = await eliminarPaqueteDB(id);
