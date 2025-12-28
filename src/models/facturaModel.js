@@ -98,13 +98,14 @@ export async function crearFacturaParaReserva(reservaInfo = {}) {
 
     // Detalle (incluye total_linea para que tu admin lo muestre bien)
     await client.query(
-      `
-      INSERT INTO detalle_factura
-        (factura_id, descripcion, cantidad, precio_unitario, total_linea)
-      VALUES ($1,$2,$3,$4,$5)
-      `,
-      [facturaId, descripcion, 1, lineaSubtotal, lineaSubtotal]
-    );
+  `
+  INSERT INTO detalle_factura
+    (factura_id, descripcion, cantidad, precio_unitario)
+  VALUES ($1,$2,$3,$4)
+  `,
+  [facturaId, descripcion, 1, lineaSubtotal]
+);
+
 
     await client.query('COMMIT');
     return { ok: true, facturaId, codigoFactura };

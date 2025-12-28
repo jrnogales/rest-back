@@ -1,0 +1,64 @@
+[33mdc5a822[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m admin complete
+[33mf6c4a4f[m fix: ajustar paquetesIntegracionController y URLs públicas para Render
+[33m1ccd907[m refactor: separar DBs y adaptar backend a microservicios manteniendo rutas
+[33m49bfe1b[m admin complete
+[33mef2110a[m admin completo
+[33mbbd5a8c[m admin paquetes acd
+[33mb96dd12[m admin paquetes activdaod
+[33m1d57c05[m admin paquetes activdao
+[33mfa5bccc[m admin paquetes activo
+[33md19ef7a[m admin paquetess
+[33m1dff263[m admin paquetes
+[33m1dafaa8[m c
+[33m838d928[m cancelr
+[33m1aad494[m cancelar fr
+[33m0386dd8[m cancelar fr
+[33mdb05a82[m cancelar
+[33m19291ec[m cancelar
+[33m2d53c29[m api adminn
+[33m57f6f95[m api admin
+[33m20891e7[m pago banco complete
+[33mff571f5[m pago banco c
+[33m3778963[m pago bancoo
+[33m61ab109[m pago banco
+[33mdffa32a[m completo
+[33m8636d87[m ojala ya vakga xd
+[33ma557b4a[m descripcdasd
+[33mfc86069[m descripciono
+[33mfd14b06[m descripcion del cambio
+[33m0c05891[m Carrito: múltiples reservas y una sola factura; actualizar integracionController y facturaModel
+[33m81b9373[m Fix detalle_factura: no insertar total_linea (columna generada)
+[33m35ad502[m Fix facturaModel: quitar columna nombre y crear factura válida
+[33m514ac65[m descripcion del cambio
+[33mce1df52[m Fix: integración REST completa, reserva con usuario_id, factura automática, stock 30/día
+[33mf647434[m Fix: reserva ligada a usuario, retorno completo, creación correcta de factura
+[33m88cc139[m Add cancelarReserva export in reservaModel
+[33me52c3da[m Fix: checkout genera reserva, factura y actualiza stock (30 cupos)
+[33m8d7646e[m Fix origen length for reservas (varchar10)
+[33m9e557b7[m Fix: ruta /paquetes/availability antes de /:id
+[33mbf70836[m descripcion del cambio
+[33mee7639d[m feat: endpoint GET /api/v1/reservas/user/:id
+[33m64eff79[m Fix: reservas guardan usuarioId + agregar getReservasPorUsuario
+[33mfeeef5a[m Cambios realizados
+[33m5aa76e9[m Add REST auth system (login, register, JWT, users model)
+[33m86b79dd[m feat: api v1, http codes y HATEOAS
+[33mb4cf83a[m chore: force TLS no-verify (temporary)
+[33m24a43f5[m chore: disable TLS verify in container (temporary)
+[33m6298482[m chore(debug): endpoint /__debug/db para probar conexión
+[33m96ea704[m fix(db): forzar SSL no-verify para cert self-signed
+[33m2705a08[m fix(db): SSL compatible con certificados self-signed (rejectUnauthorized:false)
+[33m447daf3[m fix: getPaqueteByCodigo query corrected
+[33m1964da0[m fix: server router import y rutas /api/integracion/paquetes/*
+[33m121951d[m remove nested repo
+[33m64d45c0[m mensaje
+[33m102f1b1[m chore: remove nested repo and ignore rest-integracion-backend/
+[33mcecabe4[m chore: remove nested repo and ignore rest-integracion-backend/
+[33mfa3c79d[m Feat: API paths updated to /api/integracion/paquetes/*
+[33mc5a1197[m feat: add ensureAndGetDisponibilidad to disponibilidadModel
+[33m6702c29[m Fix: reservaModel completo con cancelarReserva
+[33m80a39f6[m fix(reservas): wrap SQL in template strings and guard stock logic
+[33ma5cc12f[m fix(disponibilidad): wrap SQL in template strings and add helpers
+[33mf32c5c0[m chore: add minimal logger wrapper
+[33m368e20f[m fix: update router import
+[33m4980af3[m Fix: corrected logger template
+[33m8160fa2[m Initial REST backend
