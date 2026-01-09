@@ -12,6 +12,9 @@ import authRoutes from './routes/authRoutes.js';
 import reservasRoutes from './routes/reservasRoutes.js';
 
 import { pools } from './config/db.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 
 // ⚠️ Temporal (si tu banco o DB usan self-signed)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -19,6 +22,13 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const API_VERSION = 'v1';
 
 const app = express();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Servir el gateway en /index.html
+app.use(express.static(path.join(__dirname, 'public')));
+
 app.use(cors());
 app.use(express.json());
 app.use(cookieParser());
