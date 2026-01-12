@@ -10,9 +10,12 @@
     pre{padding:14px;overflow:auto}
     .box{border:1px solid #ddd;border-radius:10px;padding:14px;margin:14px 0}
     .muted{color:#666}
-    .row{display:flex;gap:10px;flex-wrap:wrap}
-    .pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#eef}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#eef;font-weight:700}
+    .note{background:#fffbe6;border:1px solid #f2e2a8;border-radius:10px;padding:12px;margin:14px 0}
     a{color:#0b65c2}
+    h1{margin-bottom:6px}
+    .small{font-size:13px}
   </style>
 </head>
 <body>
@@ -21,13 +24,21 @@
     Base URL: <b id="base"></b>
   </p>
 
+  <div class="note">
+    <b>Importante:</b>
+    <div class="small">
+      Este es un <b>solo Gateway</b> para todas las APIs de integración del Booking Bus.
+      Los ejemplos usan el paquete <code>CUEN-CAJAS</code> como referencia.
+    </div>
+  </div>
+
   <div class="box">
     <h2>1) GET Paquetes</h2>
     <div class="row">
       <span class="pill">GET</span>
       <code>/api/v2/paquetes</code>
     </div>
-    <p>Devuelve el listado de paquetes.</p>
+    <p>Devuelve el listado de paquetes disponibles.</p>
     <pre><code>curl -X GET "<span class="base"></span>/api/v2/paquetes"</code></pre>
   </div>
 
@@ -39,13 +50,14 @@
     </div>
     <p><b>Body (ejemplo):</b></p>
     <pre><code>{
-  "idPaquete": "1",
+  "idPaquete": "CUEN-CAJAS",
   "fechaInicio": "2026-01-09T00:20:30.576Z",
-  "personas": 10
+  "personas": 1
 }</code></pre>
     <pre><code>curl -X POST "<span class="base"></span>/api/v2/paquetes/availability" \
   -H "Content-Type: application/json" \
-  -d '{"idPaquete":"1","fechaInicio":"2026-01-09T00:20:30.576Z","personas":10}'</code></pre>
+  -d '{"idPaquete":"CUEN-CAJAS","fechaInicio":"2026-01-09T00:20:30.576Z","personas":1}'</code></pre>
+    <p class="muted small">Respuesta esperada: <code>{ "disponible": true/false, "cupos_disponibles": number }</code></p>
   </div>
 
   <div class="box">
@@ -54,15 +66,17 @@
       <span class="pill">POST</span>
       <code>/api/v2/paquetes/usuarios/externo</code>
     </div>
+    <p>Crea/actualiza el usuario externo por correo (upsert).</p>
     <p><b>Body (ejemplo):</b></p>
     <pre><code>{
-  "correo": "patito@gmail.com",
-  "nombre": "patito",
-  "apellido": "patito"
+  "correo": "patito+ext@gmail.com",
+  "nombre": "Patito",
+  "apellido": "Perez"
 }</code></pre>
     <pre><code>curl -X POST "<span class="base"></span>/api/v2/paquetes/usuarios/externo" \
   -H "Content-Type: application/json" \
-  -d '{"correo":"patito@gmail.com","nombre":"patito","apellido":"patito"}'</code></pre>
+  -d '{"correo":"patito+ext@gmail.com","nombre":"Patito","apellido":"Perez"}'</code></pre>
+    <p class="muted small">Respuesta esperada: <code>{ "id_usuario": number, "correo": "..." }</code></p>
   </div>
 
   <div class="box">
@@ -71,65 +85,76 @@
       <span class="pill">POST</span>
       <code>/api/v2/paquetes/pre-reserva</code>
     </div>
+    <p>Crea un hold (pre-reserva) temporal para confirmar luego con <code>/reserva</code>.</p>
     <p><b>Body (ejemplo):</b></p>
     <pre><code>{
-  "idPaquete": "1",
-  "bookingUserId": "patito@gmail.com",
-  "correo": "patito@gmail.com",
+  "idPaquete": "CUEN-CAJAS",
   "fechaInicio": "2026-01-09T00:24:26.935Z",
   "turistas": [
     {
-      "nombre": "patito",
-      "apellido": "patito",
-      "fechaNacimiento": "2026-01-09T00:24:26.935Z",
+      "nombre": "Patito",
+      "apellido": "Perez",
+      "fechaNacimiento": "1999-01-01T00:00:00.000Z",
       "tipoIdentificacion": "CI",
-      "identificacion": "1234567890"
+      "identificacion": "1234567890",
+      "tipo": "adulto"
     }
   ],
-  "duracionHoldSegundos": 300
+  "duracionHoldSegundos": 1800
 }</code></pre>
+    <pre><code>curl -X POST "<span class="base"></span>/api/v2/paquetes/pre-reserva" \
+  -H "Content-Type: application/json" \
+  -d '{"idPaquete":"CUEN-CAJAS","fechaInicio":"2026-01-09T00:24:26.935Z","turistas":[{"nombre":"Patito","apellido":"Perez","fechaNacimiento":"1999-01-01T00:00:00.000Z","tipoIdentificacion":"CI","identificacion":"1234567890","tipo":"adulto"}],"duracionHoldSegundos":1800}'</code></pre>
+    <p class="muted small">Respuesta esperada: <code>{ "id_hold": "HOLD-XXXXXX", "expiraEn": "..." }</code></p>
   </div>
 
   <div class="box">
-    <h2>5) POST Reserva</h2>
+    <h2>5) POST Reserva (Confirmar Hold)</h2>
     <div class="row">
       <span class="pill">POST</span>
       <code>/api/v2/paquetes/reserva</code>
     </div>
+    <p>Confirma el hold y crea la reserva definitiva.</p>
     <p><b>Body (ejemplo):</b></p>
     <pre><code>{
-  "idPaquete": "1",
-  "idHold": "HOLD-123412",
+  "idPaquete": "CUEN-CAJAS",
+  "idHold": "HOLD-XXXXXX",
   "correo": "patito@gmail.com",
-  "metodoPago": "Efectivo",
   "turistas": [
     {
-      "nombre": "patito",
-      "apellido": "patito",
-      "fechaNacimiento": "2026-01-09T00:27:41.837Z",
+      "nombre": "Patito",
+      "apellido": "Perez",
+      "fechaNacimiento": "1999-01-01T00:00:00.000Z",
       "tipoIdentificacion": "CI",
-      "identificacion": "1234567890"
+      "identificacion": "1234567890",
+      "tipo": "adulto"
     }
-  ],
-  "paymentStatus": "TRUE"
+  ]
 }</code></pre>
+    <pre><code>curl -X POST "<span class="base"></span>/api/v2/paquetes/reserva" \
+  -H "Content-Type: application/json" \
+  -d '{"idPaquete":"CUEN-CAJAS","idHold":"HOLD-XXXXXX","correo":"patito@gmail.com","turistas":[{"nombre":"Patito","apellido":"Perez","fechaNacimiento":"1999-01-01T00:00:00.000Z","tipoIdentificacion":"CI","identificacion":"1234567890","tipo":"adulto"}]}'</code></pre>
+    <p class="muted small">Respuesta esperada: <code>{ "id_reserva": "RV-...", "reserva_id_interno": number }</code></p>
   </div>
 
   <div class="box">
-    <h2>6) POST Facturas</h2>
+    <h2>6) POST Facturas (Invoices)</h2>
     <div class="row">
       <span class="pill">POST</span>
       <code>/api/v2/paquetes/invoices</code>
     </div>
+    <p>Registra el pago y devuelve el enlace de factura.</p>
     <p><b>Body (ejemplo):</b></p>
     <pre><code>{
   "idReserva": "RV-1238-LAJ123",
   "correo": "patito@gmail.com",
-  "nombre": "patito",
-  "tipoIdentificacion": "CI",
-  "identificacion": "1234567890",
+  "nombre": "Patito",
   "valor": 25.50
 }</code></pre>
+    <pre><code>curl -X POST "<span class="base"></span>/api/v2/paquetes/invoices" \
+  -H "Content-Type: application/json" \
+  -d '{"idReserva":"RV-1238-LAJ123","correo":"patito@gmail.com","nombre":"Patito","valor":25.50}'</code></pre>
+    <p class="muted small">Respuesta esperada: <code>{ "url_factura": "https://.../admin/facturas/..." }</code></p>
   </div>
 
   <div class="box">
@@ -138,6 +163,7 @@
       <span class="pill">GET</span>
       <code>/api/v2/paquetes/:id/reserva</code>
     </div>
+    <p>Consulta los detalles de la reserva por su código.</p>
     <pre><code>curl -X GET "<span class="base"></span>/api/v2/paquetes/RV-1238-LAJ123/reserva"</code></pre>
   </div>
 
@@ -147,10 +173,15 @@
       <span class="pill">POST</span>
       <code>/api/v2/paquetes/cancelar</code>
     </div>
+    <p>Cancela una reserva por su código.</p>
     <p><b>Body (ejemplo):</b></p>
     <pre><code>{
-  "id_reserva": "RV-1238-LAJ123"
+  "idReserva": "RV-1238-LAJ123"
 }</code></pre>
+    <pre><code>curl -X POST "<span class="base"></span>/api/v2/paquetes/cancelar" \
+  -H "Content-Type: application/json" \
+  -d '{"idReserva":"RV-1238-LAJ123"}'</code></pre>
+    <p class="muted small">Respuesta esperada: <code>{ "exito": true/false, "valor_pagado": number }</code></p>
   </div>
 
   <hr />
