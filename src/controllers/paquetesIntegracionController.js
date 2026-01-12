@@ -41,24 +41,46 @@ function buildPaqueteRow(p) {
 async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, expira_en }) {
   await poolReservas.query(
     `
-    INSERT INTO pre_reservas (id_hold, paquete_codigo, fecha_inicio, turistas, expira_en, creado_en)
-    VALUES ($1,$2,$3,$4,$5,NOW())
+    INSERT INTO pre_reservas (
+      pre_booking_id,
+      origen,
+      estado,
+      expira_en,
+      creado_en,
+
+      id_hold,
+      paquete_codigo,
+      fecha_inicio,
+      turistas
+    )
+    VALUES ($1,'BUS','HOLD',$2,NOW(),$3,$4,$5,$6::jsonb)
     `,
-    [id_hold, paquete_codigo, fecha_inicio, JSON.stringify(turistas || []), expira_en]
+    [
+      String(id_hold),                 // pre_booking_id (NOT NULL) ✅
+      expira_en,                       // expira_en
+      String(id_hold),                 // id_hold
+      String(paquete_codigo),          // paquete_codigo
+      String(fecha_inicio),            // fecha_inicio
+      JSON.stringify(turistas || [])   // turistas
+    ]
   );
 }
 
 async function getHoldDB(id_hold) {
   const { rows } = await poolReservas.query(
-    `SELECT * FROM pre_reservas WHERE id_hold=$1 LIMIT 1`,
+    `SELECT * FROM pre_reservas WHERE id_hold=$1 OR pre_booking_id=$1 LIMIT 1`,
     [String(id_hold)]
   );
   return rows[0] || null;
 }
 
 async function deleteHoldDB(id_hold) {
-  await poolReservas.query(`DELETE FROM pre_reservas WHERE id_hold=$1`, [String(id_hold)]);
+  await poolReservas.query(
+    `DELETE FROM pre_reservas WHERE id_hold=$1 OR pre_booking_id=$1`,
+    [String(id_hold)]
+  );
 }
+
 
 /* ============================================================
    1) GET /api/v2/paquetes
