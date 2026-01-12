@@ -38,7 +38,6 @@ function buildPaqueteRow(p) {
 }
 
 // ================== Pre-reservas (DB) ==================
-// ================== Pre-reservas (DB) ==================
 async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, expira_en }) {
   // 1) Buscar paquete interno
   const pRes = await poolPaquetes.query(
@@ -57,7 +56,14 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
   const adultos = turistas.filter(t => t.tipo === 'adulto' || !t.tipo).length || 1;
   const ninos   = turistas.filter(t => t.tipo === 'nino').length || 0;
 
-  // 3) Insertar cumpliendo TODOS los NOT NULL reales
+  // 3) Cliente NOT NULL (jsonb) -> guardamos mínimo para que no falle
+  //    Puedes guardar lo que venga del primer turista como referencia
+  const cliente = {
+    nombre: turistas?.[0]?.nombre ?? null,
+    apellido: turistas?.[0]?.apellido ?? null,
+    identificacion: turistas?.[0]?.identificacion ?? null
+  };
+
   await poolReservas.query(
     `
     INSERT INTO pre_reservas (
@@ -70,6 +76,7 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
       total_usd,
       expira_en,
       estado,
+      cliente,
       creado_en,
 
       id_hold,
@@ -78,24 +85,27 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
       turistas
     )
     VALUES (
-      $1,'BUS',$2,$3::date,$4,$5,0,$6,'HOLD',NOW(),
-      $7,$8,$9,$10::jsonb
+      $1,'BUS',$2,$3::date,$4,$5,0,$6,'HOLD',$7::jsonb,NOW(),
+      $8,$9,$10,$11::jsonb
     )
     `,
     [
-      String(id_hold),                // pre_booking_id
-      paqueteId,                      // paquete_id
-      fechaViaje,                     // fecha_viaje
-      adultos,                        // adultos ✅
-      ninos,                          // ninos ✅
-      expira_en,                      // expira_en
-      String(id_hold),                // id_hold
-      String(paquete_codigo),         // paquete_codigo
-      fechaViaje,                     // fecha_inicio
-      JSON.stringify(turistas || [])  // turistas
+      String(id_hold),                 // $1 pre_booking_id
+      paqueteId,                       // $2 paquete_id
+      fechaViaje,                      // $3 fecha_viaje
+      adultos,                         // $4 adultos
+      ninos,                           // $5 ninos
+      expira_en,                       // $6 expira_en
+      JSON.stringify(cliente || {}),   // $7 cliente NOT NULL ✅
+
+      String(id_hold),                 // $8 id_hold
+      String(paquete_codigo),          // $9 paquete_codigo
+      fechaViaje,                      // $10 fecha_inicio
+      JSON.stringify(turistas || [])   // $11 turistas
     ]
   );
 }
+
 
 
 async function getHoldDB(id_hold) {
