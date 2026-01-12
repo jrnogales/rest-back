@@ -38,10 +38,11 @@ function buildPaqueteRow(p) {
 }
 
 // ================== Pre-reservas (DB) ==================
+// ================== Pre-reservas (DB) ==================
 async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, expira_en }) {
-  // 1) Buscar paquete interno por codigo (ej: "CUEN-CAJAS")
+  // 1) Buscar paquete interno
   const pRes = await poolPaquetes.query(
-    `SELECT id, codigo FROM paquetes WHERE codigo=$1 LIMIT 1`,
+    `SELECT id FROM paquetes WHERE codigo=$1 LIMIT 1`,
     [String(paquete_codigo)]
   );
 
@@ -50,9 +51,13 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
   }
 
   const paqueteId = Number(pRes.rows[0].id);
-  const fechaViaje = String(fecha_inicio).slice(0, 10); // YYYY-MM-DD
+  const fechaViaje = String(fecha_inicio).slice(0, 10);
 
-  // 2) Insertar cumpliendo NOT NULL internos + campos integración
+  // 2) Calcular adultos y niños (NOT NULL)
+  const adultos = turistas.filter(t => t.tipo === 'adulto' || !t.tipo).length || 1;
+  const ninos   = turistas.filter(t => t.tipo === 'nino').length || 0;
+
+  // 3) Insertar cumpliendo TODOS los NOT NULL reales
   await poolReservas.query(
     `
     INSERT INTO pre_reservas (
@@ -60,6 +65,8 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
       origen,
       paquete_id,
       fecha_viaje,
+      adultos,
+      ninos,
       total_usd,
       expira_en,
       estado,
@@ -71,14 +78,16 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
       turistas
     )
     VALUES (
-      $1,'BUS',$2,$3::date,0,$4,'HOLD',NOW(),
-      $5,$6,$7,$8::jsonb
+      $1,'BUS',$2,$3::date,$4,$5,0,$6,'HOLD',NOW(),
+      $7,$8,$9,$10::jsonb
     )
     `,
     [
-      String(id_hold),                // pre_booking_id (NOT NULL)
-      paqueteId,                      // paquete_id (NOT NULL) ✅
-      fechaViaje,                     // fecha_viaje (por si es NOT NULL) ✅
+      String(id_hold),                // pre_booking_id
+      paqueteId,                      // paquete_id
+      fechaViaje,                     // fecha_viaje
+      adultos,                        // adultos ✅
+      ninos,                          // ninos ✅
       expira_en,                      // expira_en
       String(id_hold),                // id_hold
       String(paquete_codigo),         // paquete_codigo
@@ -87,6 +96,7 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
     ]
   );
 }
+
 
 async function getHoldDB(id_hold) {
   const { rows } = await poolReservas.query(
