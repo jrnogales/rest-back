@@ -39,13 +39,30 @@ function buildPaqueteRow(p) {
 
 // ================== Pre-reservas (DB) ==================
 async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, expira_en }) {
+  // 1) Buscar paquete interno por codigo (ej: "CUEN-CAJAS")
+  const pRes = await poolPaquetes.query(
+    `SELECT id, codigo FROM paquetes WHERE codigo=$1 LIMIT 1`,
+    [String(paquete_codigo)]
+  );
+
+  if (!pRes.rows.length) {
+    throw new Error(`Paquete no encontrado: ${paquete_codigo}`);
+  }
+
+  const paqueteId = Number(pRes.rows[0].id);
+  const fechaViaje = String(fecha_inicio).slice(0, 10); // YYYY-MM-DD
+
+  // 2) Insertar cumpliendo NOT NULL internos + campos integración
   await poolReservas.query(
     `
     INSERT INTO pre_reservas (
       pre_booking_id,
       origen,
-      estado,
+      paquete_id,
+      fecha_viaje,
+      total_usd,
       expira_en,
+      estado,
       creado_en,
 
       id_hold,
@@ -53,15 +70,20 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
       fecha_inicio,
       turistas
     )
-    VALUES ($1,'BUS','HOLD',$2,NOW(),$3,$4,$5,$6::jsonb)
+    VALUES (
+      $1,'BUS',$2,$3::date,0,$4,'HOLD',NOW(),
+      $5,$6,$7,$8::jsonb
+    )
     `,
     [
-      String(id_hold),                 // pre_booking_id (NOT NULL) ✅
-      expira_en,                       // expira_en
-      String(id_hold),                 // id_hold
-      String(paquete_codigo),          // paquete_codigo
-      String(fecha_inicio),            // fecha_inicio
-      JSON.stringify(turistas || [])   // turistas
+      String(id_hold),                // pre_booking_id (NOT NULL)
+      paqueteId,                      // paquete_id (NOT NULL) ✅
+      fechaViaje,                     // fecha_viaje (por si es NOT NULL) ✅
+      expira_en,                      // expira_en
+      String(id_hold),                // id_hold
+      String(paquete_codigo),         // paquete_codigo
+      fechaViaje,                     // fecha_inicio
+      JSON.stringify(turistas || [])  // turistas
     ]
   );
 }
@@ -80,6 +102,7 @@ async function deleteHoldDB(id_hold) {
     [String(id_hold)]
   );
 }
+
 
 
 /* ============================================================
