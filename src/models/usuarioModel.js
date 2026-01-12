@@ -63,17 +63,29 @@ export async function upsertUserByEmail({ nombre, apellido = null, email }) {
     let user;
     if (found.rows.length) {
       user = found.rows[0];
+
       await client.query(
-        `UPDATE usuarios SET nombre=$1, apellido=COALESCE($2, apellido) WHERE id=$3`,
+        `UPDATE usuarios
+            SET nombre=$1,
+                apellido=COALESCE($2, apellido)
+          WHERE id=$3`,
         [nombre, apellido, user.id]
       );
     } else {
+      // ✅ Defaults para usuarios externos (Booking Bus)
+      const telefonoDefault = '0000000000';
+      const passwordDefault = `EXTERNAL:${email}`;
+      const passwordHash = await bcrypt.hash(passwordDefault, 10);
+
       const ins = await client.query(
-        `INSERT INTO usuarios (nombre, apellido, email, rol, estado, creado_en)
-         VALUES ($1,$2,$3,'user','activo',NOW())
-         RETURNING id, email`,
-        [nombre, apellido, email]
+        `
+        INSERT INTO usuarios (nombre, apellido, email, telefono, cedula, password_hash, rol, estado, creado_en)
+        VALUES ($1,$2,$3,$4,NULL,$5,'user','activo',NOW())
+        RETURNING id, email
+        `,
+        [nombre, apellido, email, telefonoDefault, passwordHash]
       );
+
       user = ins.rows[0];
     }
 
