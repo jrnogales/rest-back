@@ -13,16 +13,16 @@ import {
 
 const router = Router();
 
-// GET base → buscarPaquetes()
+// GET paquetes
 router.get('/', buscarPaquetes);
 
 // POST availability
 router.post('/availability', validarDisponibilidadPaquete);
 
-// POST pre-reserva
+// POST pre-reserva (hold)
 router.post('/pre-reserva', crearPreReservaPaquete);
 
-// POST reserva
+// POST reserva (confirm)
 router.post('/reserva', reservarPaquete);
 
 // POST crear usuario externo
@@ -31,11 +31,10 @@ router.post('/usuarios/externo', crearUsuarioExterno);
 // POST emitir factura
 router.post('/invoices', emitirFacturaPaquete);
 
-// GET datos reserva por código
+// GET datos reserva por id
 router.get('/:id/reserva', buscarDatosReserva);
 
-// POST cancelar reserva (para Booking Bus)
+// POST cancelar
 router.post('/cancelar', cancelarReservaPaquete);
-
 
 export default router;

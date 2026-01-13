@@ -15,13 +15,15 @@ import { pools } from './config/db.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-
 // ⚠️ Temporal (si tu banco o DB usan self-signed)
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const API_VERSION = 'v1';
 
 const app = express();
+
+// ✅ IMPORTANTE para que BaseUrl funcione igual que en C# detrás de Render
+app.set('trust proxy', 1);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -72,7 +74,7 @@ app.get('/__debug/db', async (_req, res) => {
     res.json({ ok: true, dbs: results });
   } catch (e) {
     console.error('[DB PING ERROR]', e);
-    res.status(500).json({ ok:false, error: e.message });
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
