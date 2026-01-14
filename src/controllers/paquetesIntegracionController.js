@@ -39,7 +39,9 @@ function getBaseUrl(req) {
 function mapPaqueteToCSharpModel(req, p) {
   const baseUrl = getBaseUrl(req);
 
-  const idPaquete = Number(p.id); // modelo C# usa int
+  // ✅ USAR CODIGO (ej: cuen-cajas) como idPaquete
+  const idPaquete = String(p.codigo ?? '').trim() || String(p.id);
+
   const nombre =
     p.nombre ||
     p.titulo ||
@@ -55,7 +57,7 @@ function mapPaqueteToCSharpModel(req, p) {
   const duracion = Number(p.duracion_dias || p.duracion || 1);
 
   return {
-    idPaquete,
+    idPaquete, // ✅ ahora será "cuen-cajas"
     nombre,
     ciudad,
     pais,
@@ -65,9 +67,10 @@ function mapPaqueteToCSharpModel(req, p) {
     precioActual: precio,
     imagenUrl,
     duracion,
-    _links: generarLinksPaquete(baseUrl, String(idPaquete))
+    _links: generarLinksPaquete(baseUrl, String(idPaquete)) // ✅ links con codigo
   };
 }
+
 
 // ================== Pre-reservas (DB) ==================
 async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, expira_en }) {
