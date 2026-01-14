@@ -35,13 +35,38 @@ function getBaseUrl(req) {
   return `${proto}://${host}`;
 }
 
-// Mapea paquete DB -> response con el mismo modelo del C#
+// ================== Helpers de conversión ID <-> codigo ==================
+async function getPaqueteCodigoById(idPaquete) {
+  const { rows } = await poolPaquetes.query(
+    `SELECT codigo FROM paquetes WHERE id=$1 LIMIT 1`,
+    [Number(idPaquete)]
+  );
+  return rows[0]?.codigo ?? null;
+}
+
+// Reserva: obtener por ID numérico (para GET /{id}/reserva)
+async function getReservaByIdDB(reservaId) {
+  const { rows } = await poolReservas.query(
+    `SELECT * FROM reservas WHERE id=$1 LIMIT 1`,
+    [Number(reservaId)]
+  );
+  return rows[0] ?? null;
+}
+
+// Reserva: obtener codigo_reserva por ID (para cancelar/facturar usando tus modelos)
+async function getReservaCodigoByIdDB(reservaId) {
+  const { rows } = await poolReservas.query(
+    `SELECT codigo_reserva FROM reservas WHERE id=$1 LIMIT 1`,
+    [Number(reservaId)]
+  );
+  return rows[0]?.codigo_reserva ?? null;
+}
+
+// Mapea paquete DB -> response con el mismo modelo del C# (idPaquete ENTERO)
 function mapPaqueteToCSharpModel(req, p) {
   const baseUrl = getBaseUrl(req);
 
-  // ✅ USAR CODIGO (ej: cuen-cajas) como idPaquete
-  const idPaquete = String(p.codigo ?? '').trim() || String(p.id);
-
+  const idPaquete = Number(p.id); // ✅ entero (como piden)
   const nombre =
     p.nombre ||
     p.titulo ||
@@ -57,7 +82,7 @@ function mapPaqueteToCSharpModel(req, p) {
   const duracion = Number(p.duracion_dias || p.duracion || 1);
 
   return {
-    idPaquete, // ✅ ahora será "cuen-cajas"
+    idPaquete, // ✅ entero
     nombre,
     ciudad,
     pais,
@@ -67,14 +92,13 @@ function mapPaqueteToCSharpModel(req, p) {
     precioActual: precio,
     imagenUrl,
     duracion,
-    _links: generarLinksPaquete(baseUrl, String(idPaquete)) // ✅ links con codigo
+    _links: generarLinksPaquete(baseUrl, String(idPaquete))
   };
 }
 
-
 // ================== Pre-reservas (DB) ==================
 async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, expira_en }) {
-  // 1) Buscar paquete interno
+  // 1) Buscar paquete interno por CODIGO (interno)
   const pRes = await poolPaquetes.query(
     `SELECT id FROM paquetes WHERE codigo=$1 LIMIT 1`,
     [String(paquete_codigo)]
@@ -133,7 +157,7 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
       JSON.stringify(cliente || {}),   // $7 cliente NOT NULL ✅
 
       String(id_hold),                 // $8 id_hold
-      String(paquete_codigo),          // $9 paquete_codigo
+      String(paquete_codigo),          // $9 paquete_codigo (CODIGO)
       fechaViaje,                      // $10 fecha_inicio
       JSON.stringify(turistas || [])   // $11 turistas
     ]
@@ -157,26 +181,35 @@ async function deleteHoldDB(id_hold) {
 
 /* ============================================================
    1) POST /api/v2/paquetes/availability   (MISMO MODELO C#)
+   idPaquete = ENTERO (paquetes.id)
    ============================================================ */
 export async function validarDisponibilidadPaquete(req, res) {
   const request = req.body;
 
-  // C# valida IdPaquete requerido
-  const idPaquete = request?.idPaquete ?? request?.IdPaquete;
-  if (!request || !idPaquete || String(idPaquete).trim() === '') {
+  const idPaqueteRaw = request?.idPaquete ?? request?.IdPaquete;
+  if (!request || idPaqueteRaw == null || String(idPaqueteRaw).trim() === '') {
+    return res.status(400).send('Id del paquete es requerido');
+  }
+
+  const paqueteId = Number(idPaqueteRaw);
+  if (!Number.isFinite(paqueteId)) {
     return res.status(400).send('Id del paquete es requerido');
   }
 
   try {
-    const codigo = String(idPaquete).trim();
+    const codigo = await getPaqueteCodigoById(paqueteId);
+    if (!codigo) {
+      return res.status(404).json({ error: 'Paquete no encontrado', detalle: 'idPaquete inválido' });
+    }
+
     const fechaInicio = request?.fechaInicio ?? request?.FechaInicio ?? null;
     const personas = request?.personas ?? request?.Personas ?? null;
 
-    // Validación real de cupos (si no hay fecha/personas, lo tratamos como "disponible")
+    // Si no hay fecha/personas: responde igual que el compa (disponible true)
     if (!fechaInicio || !personas) {
       return res.json({
         disponible: true,
-        idPaquete: codigo,
+        idPaquete: paqueteId,
         fechaInicio,
         personas,
         mensaje: 'Paquete disponible para reserva'
@@ -186,35 +219,32 @@ export async function validarDisponibilidadPaquete(req, res) {
     const fecha = String(fechaInicio).slice(0, 10);
     const num = Math.max(0, parseInt(personas, 10));
 
-    // Si num es 0, responde como disponible (similar a service null)
     if (!num) {
       return res.json({
         disponible: true,
-        idPaquete: codigo,
+        idPaquete: paqueteId,
         fechaInicio: fecha,
         personas: num,
         mensaje: 'Paquete disponible para reserva'
       });
     }
 
-    const disp = await ensureAndGetDisponibilidad(codigo, fecha);
+    const disp = await ensureAndGetDisponibilidad(String(codigo), fecha);
     const libres = Number(disp.cupos_totales) - Number(disp.cupos_reservados);
 
     if (libres >= num) {
-      // EXACTO al JSON "disponible == null" del C#
       return res.json({
         disponible: true,
-        idPaquete: codigo,
+        idPaquete: paqueteId,
         fechaInicio: fecha,
         personas: num,
         mensaje: 'Paquete disponible para reserva'
       });
     }
 
-    // "disponible != null" en C# devuelve lo que venga del service (aquí devolvemos un objeto)
     return res.json({
       disponible: false,
-      idPaquete: codigo,
+      idPaquete: paqueteId,
       fechaInicio: fecha,
       personas: num,
       mensaje: 'No hay cupos suficientes'
@@ -230,7 +260,6 @@ export async function validarDisponibilidadPaquete(req, res) {
 export async function crearUsuarioExterno(req, res) {
   const request = req.body;
 
-  // C# valida Correo requerido
   const correo = request?.correo ?? request?.Correo;
   if (!request || !correo || String(correo).trim() === '') {
     return res.status(400).send('Correo es requerido');
@@ -246,7 +275,6 @@ export async function crearUsuarioExterno(req, res) {
       email: String(correo).trim()
     });
 
-    // EXACTO al response del C#
     return res.json({
       idUsuario: user?.id ?? 0,
       correo: String(correo).trim(),
@@ -260,49 +288,54 @@ export async function crearUsuarioExterno(req, res) {
 
 /* ============================================================
    3) POST /api/v2/paquetes/invoices  (MISMO MODELO C#)
+   idReserva = ENTERO (reservas.id)
    ============================================================ */
 export async function emitirFacturaPaquete(req, res) {
   const request = req.body;
 
-  const idReserva = request?.idReserva ?? request?.IdReserva ?? request?.id_reserva ?? request?.idReserva;
-  if (!request || !idReserva || String(idReserva).trim() === '') {
+  const idReservaRaw = request?.idReserva ?? request?.IdReserva ?? request?.id_reserva;
+  if (!request || idReservaRaw == null || String(idReservaRaw).trim() === '') {
+    return res.status(400).send('ID de reserva es requerido');
+  }
+
+  const reservaId = Number(idReservaRaw);
+  if (!Number.isFinite(reservaId)) {
     return res.status(400).send('ID de reserva es requerido');
   }
 
   try {
-    const codigoReserva = String(idReserva).trim();
+    const codigoReserva = await getReservaCodigoByIdDB(reservaId);
+    if (!codigoReserva) {
+      return res.status(404).send('Reserva no encontrada');
+    }
+
     const valor = request?.valor ?? request?.Valor ?? request?.valor_pagado ?? null;
 
-    // Si tienes tu modelo real de facturación, lo usamos
     let result = null;
     if (valor != null) {
       try {
         result = await crearFacturaParaReserva({
-          codigoReserva,
+          codigoReserva: String(codigoReserva),
           total: Number(valor)
         });
       } catch {
-        // si falla la creación real, igual respondemos con el modelo requerido (como el compa)
         result = null;
       }
     }
 
     const codigoFacturaReal = result?.codigoFactura || result?.codigo_factura || null;
 
-    // C# genera FACT-XXXXXXXXXX
     const idFactura =
       codigoFacturaReal ||
       `FACT-${crypto.randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase()}`;
 
-    // C# usa example.com, pero puedes usar tu URL real
     const uriFactura = codigoFacturaReal
       ? `${PUBLIC_BASE_URL}/admin/facturas/${codigoFacturaReal}`
-      : `https://facturas.example.com/${codigoReserva}`;
+      : `https://facturas.example.com/${reservaId}`;
 
-    // EXACTO al response del C#
     return res.json({
       idFactura,
-      idReserva: codigoReserva,
+      idReserva: reservaId,
       correo: request?.correo ?? request?.Correo ?? null,
       nombreCompleto: request?.nombre ?? request?.Nombre ?? null,
       tipoIdentificacion: request?.tipoIdentificacion ?? request?.TipoIdentificacion ?? null,
@@ -319,6 +352,7 @@ export async function emitirFacturaPaquete(req, res) {
 
 /* ============================================================
    4) GET /api/v2/paquetes  (MISMO MODELO C#)
+   idPaquete = ENTERO
    ============================================================ */
 export async function buscarPaquetes(req, res) {
   try {
@@ -327,17 +361,14 @@ export async function buscarPaquetes(req, res) {
     const pagina = Math.max(1, parseInt(req.query.pagina ?? '1', 10) || 1);
     const limite = Math.max(1, parseInt(req.query.limite ?? '10', 10) || 10);
 
-    // Puedes ignorar filtros (como el C# los acepta pero el service decide)
     const { rows } = await poolPaquetes.query(`SELECT * FROM paquetes ORDER BY id ASC`);
 
     const datos = rows.map(p => {
       const mapped = mapPaqueteToCSharpModel(req, p);
-      // asegurar links con baseUrl calculado
       mapped._links = generarLinksPaquete(baseUrl, String(mapped.idPaquete));
       return mapped;
     });
 
-    // EXACTO al wrapper del C#
     return res.json({
       datos,
       paginacion: {
@@ -354,35 +385,42 @@ export async function buscarPaquetes(req, res) {
 
 /* ============================================================
    5) POST /api/v2/paquetes/pre-reserva  (MISMO MODELO C#)
+   idPaquete = ENTERO, internamente usamos CODIGO
    ============================================================ */
 export async function crearPreReservaPaquete(req, res) {
   try {
     const baseUrl = getBaseUrl(req);
     const request = req.body;
 
-    const idPaquete = request?.idPaquete ?? request?.IdPaquete ?? request?.id_paquete;
-    if (!request || !idPaquete || String(idPaquete).trim() === '') {
-      // C# mensaje exacto:
+    const idPaqueteRaw = request?.idPaquete ?? request?.IdPaquete ?? request?.id_paquete;
+    if (!request || idPaqueteRaw == null || String(idPaqueteRaw).trim() === '') {
       return res.status(400).send('Debe proporcionar id_paquete');
+    }
+
+    const paqueteId = Number(idPaqueteRaw);
+    if (!Number.isFinite(paqueteId)) {
+      return res.status(400).send('Debe proporcionar id_paquete');
+    }
+
+    const codigo = await getPaqueteCodigoById(paqueteId);
+    if (!codigo) {
+      return res.status(404).send('Paquete no encontrado');
     }
 
     const fechaInicio = request?.fechaInicio ?? request?.FechaInicio ?? request?.fecha_inicio ?? null;
     const turistas = request?.turistas ?? request?.Turistas ?? [];
 
     const holdId = `HOLD-${crypto.randomUUID()}`;
-
-    // Expira: usa lo que tú quieras; el C# devuelve holdResponse.Expira
     const expira = new Date(Date.now() + 10 * 60 * 1000);
 
     await createHoldDB({
       id_hold: holdId,
-      paquete_codigo: String(idPaquete).trim(),
+      paquete_codigo: String(codigo), // ✅ interno por codigo
       fecha_inicio: fechaInicio ? String(fechaInicio).slice(0, 10) : new Date().toISOString().slice(0, 10),
       turistas,
       expira_en: expira.toISOString()
     });
 
-    // EXACTO al response del C#
     return res.json({
       id_hold: holdId,
       fechaExpiracion: expira,
@@ -395,6 +433,7 @@ export async function crearPreReservaPaquete(req, res) {
 
 /* ============================================================
    6) GET /api/v2/paquetes/:id/reserva  (MISMO MODELO C#)
+   id = ENTERO (reservas.id)
    ============================================================ */
 export async function buscarDatosReserva(req, res) {
   try {
@@ -405,25 +444,30 @@ export async function buscarDatosReserva(req, res) {
       return res.status(400).send('Debe proporcionar el ID de la reserva');
     }
 
-    // C# exige numérico
     if (!/^\d+$/.test(id)) {
       return res.status(400).send('ID de reserva debe ser un número válido');
     }
 
-    // Tu lógica real: por ahora intenta obtener por código
-    const r = await getReservaPorCodigo(id);
+    const r = await getReservaByIdDB(id);
     if (!r) {
       return res.status(404).end();
     }
 
-    // C# arma invoice con example.com; aquí puedes usar el real
-    const uriFactura = `https://facturas.example.com/${id}`;
+    // Si existe factura real, intenta traerla usando tu modelo por reserva_id
+    let uriFactura = `https://facturas.example.com/${id}`;
+    try {
+      const f = await getFacturaByReservaId(Number(id));
+      if (f?.codigo_factura) {
+        uriFactura = `${PUBLIC_BASE_URL}/admin/facturas/${f.codigo_factura}`;
+      }
+    } catch {
+      // noop
+    }
 
-    // EXACTO al response del C#
     return res.json({
-      id_reserva: id,
+      id_reserva: Number(id),
       data: r,
-      _links: generarLinksReserva(baseUrl, id, uriFactura)
+      _links: generarLinksReserva(baseUrl, String(id), uriFactura)
     });
   } catch (err) {
     return res.status(500).json({ error: 'Error al obtener reserva', detalle: err.message });
@@ -432,6 +476,7 @@ export async function buscarDatosReserva(req, res) {
 
 /* ============================================================
    7) POST /api/v2/paquetes/reserva  (MISMO MODELO C#)
+   idPaquete = ENTERO, hold guarda codigo, respuesta id_reserva ENTERO
    ============================================================ */
 export async function reservarPaquete(req, res) {
   try {
@@ -442,23 +487,37 @@ export async function reservarPaquete(req, res) {
       return res.status(400).send('Debe proporcionar los datos de reserva');
     }
 
-    const idHold = request?.idHold ?? request?.IdHold ?? request?.id_hold;
+    const idHoldRaw = request?.idHold ?? request?.IdHold ?? request?.id_hold;
     const correo = request?.correo ?? request?.Correo ?? null;
 
-    if (!idHold || !correo) {
+    if (!idHoldRaw || !correo) {
       return res.status(400).send('Debe proporcionar id_hold y correo');
     }
 
-    const holdId = String(idHold).trim();
+    const holdId = String(idHoldRaw).trim();
     const email = String(correo).trim();
 
-    // Normalizar payment_status igual que C#
     let paymentStatus = request?.paymentStatus ?? request?.PaymentStatus ?? 'paid';
     if (String(paymentStatus).toUpperCase() === 'CONFIRMADO') {
       paymentStatus = 'paid';
     }
 
     const turistas = request?.turistas ?? request?.Turistas ?? [];
+
+    const idPaqueteRaw = request?.idPaquete ?? request?.IdPaquete ?? request?.id_paquete;
+    if (idPaqueteRaw == null || String(idPaqueteRaw).trim() === '') {
+      return res.status(400).send('Debe proporcionar id_paquete');
+    }
+
+    const paqueteId = Number(idPaqueteRaw);
+    if (!Number.isFinite(paqueteId)) {
+      return res.status(400).send('Debe proporcionar id_paquete');
+    }
+
+    const codigo = await getPaqueteCodigoById(paqueteId);
+    if (!codigo) {
+      return res.status(404).send('Paquete no encontrado');
+    }
 
     const hold = await getHoldDB(holdId);
     if (!hold) {
@@ -470,7 +529,10 @@ export async function reservarPaquete(req, res) {
       return res.status(400).send('No se pudo confirmar la reserva. Verifique que el hold esté activo.');
     }
 
-    const idPaquete = request?.idPaquete ?? request?.IdPaquete ?? request?.id_paquete ?? hold.paquete_codigo;
+    // ✅ Validar que el hold pertenece al mismo paquete (hold guarda codigo)
+    if (String(hold.paquete_codigo) !== String(codigo)) {
+      return res.status(400).send('No se pudo confirmar la reserva. Verifique que el hold esté activo.');
+    }
 
     const fecha = String(hold.fecha_inicio).slice(0, 10);
     const adultos = turistas.filter(t => t.tipo === 'adulto' || !t.tipo).length || 1;
@@ -483,7 +545,7 @@ export async function reservarPaquete(req, res) {
     });
 
     const r = await crearReserva({
-      codigo: String(idPaquete),
+      codigo: String(codigo), // ✅ interno por codigo
       fecha,
       adultos,
       ninos,
@@ -493,15 +555,15 @@ export async function reservarPaquete(req, res) {
 
     await deleteHoldDB(holdId);
 
-    // EXACTO al response del C#
+    // ✅ id_reserva ENTERO (para que GET/cancelar/invoices sean numéricos)
     return res.json({
-      id_reserva: r.codigoReserva,
-      id_paquete: String(idPaquete),
+      id_reserva: Number(r.reservaId),
+      id_paquete: paqueteId,
       id_hold: holdId,
       correo: email,
       payment_status: paymentStatus,
       turistas,
-      _links: generarLinksReserva(baseUrl, r.codigoReserva, null)
+      _links: generarLinksReserva(baseUrl, String(r.reservaId), null)
     });
   } catch (err) {
     return res.status(500).json({ error: 'Error al confirmar reserva', detalle: err.message });
@@ -510,26 +572,30 @@ export async function reservarPaquete(req, res) {
 
 /* ============================================================
    8) POST /api/v2/paquetes/cancelar  (MISMO MODELO C#)
+   id_reserva = ENTERO (reservas.id) -> interno cancelamos por codigo_reserva
    ============================================================ */
 export async function cancelarReservaPaquete(req, res) {
   const request = req.body;
 
-  // C# espera request.id_reserva
-  const idReserva = request?.id_reserva ?? request?.idReserva ?? request?.IdReserva;
+  const idReservaRaw = request?.id_reserva ?? request?.idReserva ?? request?.IdReserva;
 
-  if (!request || !idReserva || String(idReserva).trim() === '') {
+  if (!request || idReservaRaw == null || String(idReservaRaw).trim() === '') {
     return res.status(400).send('id_reserva es requerido');
   }
 
-  try {
-    const codigo = String(idReserva).trim();
+  const reservaId = Number(idReservaRaw);
+  if (!Number.isFinite(reservaId) || !/^\d+$/.test(String(idReservaRaw).trim())) {
+    return res.status(400).send('id_reserva debe ser un número válido');
+  }
 
-    // C# exige numérico
-    if (!/^\d+$/.test(codigo)) {
-      return res.status(400).send('id_reserva debe ser un número válido');
+  try {
+    const codigoReserva = await getReservaCodigoByIdDB(reservaId);
+    if (!codigoReserva) {
+      return res.status(404).json({ error: 'Reserva no encontrada o ya está cancelada' });
     }
 
-    const r = await getReservaPorCodigo(codigo);
+    // Validar estado (opcional) con tu modelo si existe
+    const r = await getReservaPorCodigo(String(codigoReserva));
     if (!r) {
       return res.status(404).json({ error: 'Reserva no encontrada o ya está cancelada' });
     }
@@ -538,9 +604,8 @@ export async function cancelarReservaPaquete(req, res) {
       return res.status(404).json({ error: 'Reserva no encontrada o ya está cancelada' });
     }
 
-    await cancelarReservaCore(codigo);
+    await cancelarReservaCore(String(codigoReserva));
 
-    // EXACTO al response del C#
     return res.json({
       exito: true,
       valor_pasado: 23.09
