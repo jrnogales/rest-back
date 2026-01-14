@@ -1,4 +1,3 @@
-// src/controllers/paquetesIntegracionController.js
 import crypto from 'crypto';
 import { pools } from '../config/db.js';
 import { ensureAndGetDisponibilidad } from '../models/disponibilidadModel.js';
@@ -19,7 +18,6 @@ import {
 const poolPaquetes = pools.paquetes;
 const poolReservas = pools.reservas;
 
-// URL pública real del backend desplegado en Render
 const PUBLIC_BASE_URL = 'https://rest-back-xnjm.onrender.com';
 
 // ================== Utils ==================
@@ -28,102 +26,56 @@ function brief(txt = '', len = 140) {
   return s.length <= len ? s : s.slice(0, len - 1) + '…';
 }
 
-// BaseUrl equivalente a $"{Request.Scheme}://{Request.Host}"
 function getBaseUrl(req) {
   const proto = req.headers['x-forwarded-proto'] || req.protocol;
   const host = req.headers['x-forwarded-host'] || req.get('host');
   return `${proto}://${host}`;
 }
 
-// ============ Helpers: normalización de IDs ============
-function toIntOrNull(v) {
-  if (v == null) return null;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  const i = Math.trunc(n);
-  return i > 0 ? i : null;
+// ✅ Contrato BUS: ids llegan como "string" (pero deben ser numéricos)
+function requireNumericIdString(value, fieldNameForMsg) {
+  const s = String(value ?? '').trim();
+  if (!s) return { ok: false, message: `${fieldNameForMsg} es requerido` };
+  if (!/^\d+$/.test(s)) return { ok: false, message: `${fieldNameForMsg} debe ser un número válido` };
+  return { ok: true, str: s, int: Number(s) };
 }
 
-async function getPaqueteCodigoById(idPaquete) {
+async function getPaqueteCodigoById(paqueteIdInt) {
   const { rows } = await poolPaquetes.query(
     `SELECT codigo FROM paquetes WHERE id=$1 LIMIT 1`,
-    [Number(idPaquete)]
+    [paqueteIdInt]
   );
   return rows[0]?.codigo ?? null;
 }
 
-async function getReservaCodigoByIdDB(reservaId) {
+async function getReservaCodigoById(reservaIdInt) {
+  // tu columna se llama codigo_reserva (confirmado por ti)
   const { rows } = await poolReservas.query(
     `SELECT codigo_reserva FROM reservas WHERE id=$1 LIMIT 1`,
-    [Number(reservaId)]
+    [reservaIdInt]
   );
   return rows[0]?.codigo_reserva ?? null;
 }
 
-async function getReservaByIdDB(reservaId) {
-  const { rows } = await poolReservas.query(
-    `SELECT * FROM reservas WHERE id=$1 LIMIT 1`,
-    [Number(reservaId)]
-  );
-  return rows[0] ?? null;
-}
-
-// Mapea paquete DB -> response (idPaquete ENTERO)
-function mapPaqueteToCSharpModel(req, p) {
-  const baseUrl = getBaseUrl(req);
-
-  const idPaquete = Number(p.id);
-  const nombre =
-    p.nombre ||
-    p.titulo ||
-    p.nombre_paquete ||
-    `Paquete ${p.codigo ?? p.id}`;
-
-  const ciudad = p.ciudad || 'Cuenca';
-  const pais = p.pais || 'Ecuador';
-  const tipoActividad = p.tipo_actividad || p.categoria || 'Paquete turístico';
-  const capacidad = Number(p.stock || p.capacidad || 30);
-  const precio = Number(p.precio_adulto || p.precio || 0);
-  const imagenUrl = p.imagen || p.uri_imagen || '';
-  const duracion = Number(p.duracion_dias || p.duracion || 1);
-
-  return {
-    idPaquete, // ✅ ENTERO
-    nombre,
-    ciudad,
-    pais,
-    tipoActividad,
-    capacidad,
-    precioNormal: precio,
-    precioActual: precio,
-    imagenUrl,
-    duracion,
-    _links: generarLinksPaquete(baseUrl, String(idPaquete))
-  };
-}
-
 // ================== Pre-reservas (DB) ==================
-async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, expira_en }) {
-  // Buscar paquete por CODIGO (interno)
+async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, expira_en, correo, booking_user_id }) {
   const pRes = await poolPaquetes.query(
     `SELECT id FROM paquetes WHERE codigo=$1 LIMIT 1`,
     [String(paquete_codigo)]
   );
-
-  if (!pRes.rows.length) {
-    throw new Error(`Paquete no encontrado: ${paquete_codigo}`);
-  }
+  if (!pRes.rows.length) throw new Error(`Paquete no encontrado: ${paquete_codigo}`);
 
   const paqueteId = Number(pRes.rows[0].id);
   const fechaViaje = String(fecha_inicio).slice(0, 10);
 
-  const adultos = turistas.filter(t => t.tipo === 'adulto' || !t.tipo).length || 1;
-  const ninos = turistas.filter(t => t.tipo === 'nino').length || 0;
+  const adultos = (turistas || []).filter(t => (t.tipo || '').toLowerCase() !== 'nino').length || 1;
+  const ninos = (turistas || []).filter(t => (t.tipo || '').toLowerCase() === 'nino').length || 0;
 
   const cliente = {
     nombre: turistas?.[0]?.nombre ?? null,
     apellido: turistas?.[0]?.apellido ?? null,
-    identificacion: turistas?.[0]?.identificacion ?? null
+    identificacion: turistas?.[0]?.identificacion ?? null,
+    correo: correo ?? null
   };
 
   await poolReservas.query(
@@ -144,11 +96,13 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
       id_hold,
       paquete_codigo,
       fecha_inicio,
-      turistas
+      turistas,
+      booking_user_id,
+      correo
     )
     VALUES (
       $1,'BUS',$2,$3::date,$4,$5,0,$6,'HOLD',$7::jsonb,NOW(),
-      $8,$9,$10,$11::jsonb
+      $8,$9,$10,$11::jsonb,$12,$13
     )
     `,
     [
@@ -161,9 +115,11 @@ async function createHoldDB({ id_hold, paquete_codigo, fecha_inicio, turistas, e
       JSON.stringify(cliente || {}),
 
       String(id_hold),
-      String(paquete_codigo),          // CODIGO
+      String(paquete_codigo),
       fechaViaje,
-      JSON.stringify(turistas || [])
+      JSON.stringify(turistas || []),
+      booking_user_id ?? null,
+      correo ?? null
     ]
   );
 }
@@ -183,8 +139,39 @@ async function deleteHoldDB(id_hold) {
   );
 }
 
+// ================== Mapeo paquetes (GET) ==================
+function mapPaqueteToBusModel(req, p) {
+  const baseUrl = getBaseUrl(req);
+
+  const idPaquete = Number(p.id); // ✅ GET paquetes: INT
+  const nombre =
+    p.nombre || p.titulo || p.nombre_paquete || `Paquete ${p.codigo ?? p.id}`;
+
+  const ciudad = p.ciudad || 'Cuenca';
+  const pais = p.pais || 'Ecuador';
+  const tipoActividad = p.tipo_actividad || p.categoria || 'Paquete turístico';
+  const capacidad = Number(p.stock || p.capacidad || 30);
+  const precio = Number(p.precio_adulto || p.precio || 0);
+  const imagenUrl = p.imagen || p.uri_imagen || '';
+  const duracion = Number(p.duracion_dias || p.duracion || 1);
+
+  return {
+    idPaquete,
+    nombre,
+    ciudad,
+    pais,
+    tipoActividad,
+    capacidad,
+    precioNormal: precio,
+    precioActual: precio,
+    imagenUrl,
+    duracion,
+    _links: generarLinksPaquete(baseUrl, String(idPaquete))
+  };
+}
+
 /* ============================================================
-   1) GET /api/v2/paquetes  (idPaquete ENTERO)
+   GET /api/v2/paquetes
    ============================================================ */
 export async function buscarPaquetes(req, res) {
   try {
@@ -193,9 +180,8 @@ export async function buscarPaquetes(req, res) {
     const limite = Math.max(1, parseInt(req.query.limite ?? '10', 10) || 10);
 
     const { rows } = await poolPaquetes.query(`SELECT * FROM paquetes ORDER BY id ASC`);
-
     const datos = rows.map(p => {
-      const mapped = mapPaqueteToCSharpModel(req, p);
+      const mapped = mapPaqueteToBusModel(req, p);
       mapped._links = generarLinksPaquete(baseUrl, String(mapped.idPaquete));
       return mapped;
     });
@@ -215,44 +201,38 @@ export async function buscarPaquetes(req, res) {
 }
 
 /* ============================================================
-   2) POST /api/v2/paquetes/availability (idPaquete ENTERO)
+   POST /api/v2/paquetes/availability
+   CONTRATO (te piden):
+   {
+     "idPaquete": "string",
+     "fechaInicio": "2026-01-14T..Z",
+     "personas": 0
+   }
    ============================================================ */
 export async function validarDisponibilidadPaquete(req, res) {
-  const request = req.body;
+  const request = req.body || {};
 
-  const idPaqueteRaw = request?.idPaquete ?? request?.IdPaquete;
-  const paqueteId = toIntOrNull(idPaqueteRaw);
-  if (!request || paqueteId == null) {
-    return res.status(400).send('Id del paquete es requerido');
-  }
+  const idCheck = requireNumericIdString(request.idPaquete ?? request.IdPaquete, 'idPaquete');
+  if (!idCheck.ok) return res.status(400).send('Id del paquete es requerido');
 
   try {
-    const codigo = await getPaqueteCodigoById(paqueteId);
+    const paqueteIdInt = idCheck.int;
+    const codigo = await getPaqueteCodigoById(paqueteIdInt);
     if (!codigo) {
-      return res.status(404).json({ error: 'Paquete no encontrado', detalle: 'idPaquete inválido' });
+      return res.status(404).json({ disponible: false, mensaje: 'Paquete no encontrado' });
     }
 
-    const fechaInicio = request?.fechaInicio ?? request?.FechaInicio ?? null;
-    const personas = request?.personas ?? request?.Personas ?? null;
+    const fechaInicio = request.fechaInicio ?? request.FechaInicio ?? null;
+    const personas = request.personas ?? request.Personas ?? 0;
 
-    if (!fechaInicio || !personas) {
+    const fecha = fechaInicio ? String(fechaInicio).slice(0, 10) : null;
+    const num = Math.max(0, parseInt(personas, 10) || 0);
+
+    if (!fecha || !num) {
       return res.json({
         disponible: true,
-        idPaquete: paqueteId, // ✅ ENTERO
+        idPaquete: idCheck.str,  // ✅ como te piden: string
         fechaInicio,
-        personas,
-        mensaje: 'Paquete disponible para reserva'
-      });
-    }
-
-    const fecha = String(fechaInicio).slice(0, 10);
-    const num = Math.max(0, parseInt(personas, 10));
-
-    if (!num) {
-      return res.json({
-        disponible: true,
-        idPaquete: paqueteId,
-        fechaInicio: fecha,
         personas: num,
         mensaje: 'Paquete disponible para reserva'
       });
@@ -261,22 +241,13 @@ export async function validarDisponibilidadPaquete(req, res) {
     const disp = await ensureAndGetDisponibilidad(String(codigo), fecha);
     const libres = Number(disp.cupos_totales) - Number(disp.cupos_reservados);
 
-    if (libres >= num) {
-      return res.json({
-        disponible: true,
-        idPaquete: paqueteId,
-        fechaInicio: fecha,
-        personas: num,
-        mensaje: 'Paquete disponible para reserva'
-      });
-    }
-
     return res.json({
-      disponible: false,
-      idPaquete: paqueteId,
-      fechaInicio: fecha,
+      disponible: libres >= num,
+      idPaquete: idCheck.str,      // ✅ string
+      fechaInicio,
       personas: num,
-      mensaje: 'No hay cupos suficientes'
+      cupos_disponibles: libres,
+      mensaje: libres >= num ? 'Paquete disponible para reserva' : 'No hay cupos suficientes'
     });
   } catch (err) {
     return res.status(500).json({ error: 'Error al validar disponibilidad', detalle: err.message });
@@ -284,36 +255,77 @@ export async function validarDisponibilidadPaquete(req, res) {
 }
 
 /* ============================================================
-   3) POST /api/v2/paquetes/pre-reserva (idPaquete ENTERO)
+   POST /api/v2/paquetes/usuarios/externo
+   ============================================================ */
+export async function crearUsuarioExterno(req, res) {
+  const request = req.body || {};
+
+  const correo = String(request.correo ?? request.Correo ?? '').trim();
+  const nombre = String(request.nombre ?? request.Nombre ?? '').trim();
+  const apellido = String(request.apellido ?? request.Apellido ?? '').trim();
+
+  if (!correo) return res.status(400).send('Correo es requerido');
+
+  try {
+    const user = await upsertUserByEmail({
+      nombre: nombre || null,
+      apellido: apellido || null,
+      email: correo
+    });
+
+    return res.json({
+      idUsuario: user?.id ?? 0,
+      correo,
+      exitoso: true,
+      mensaje: 'Usuario externo creado/obtenido exitosamente'
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Error al crear usuario externo', detalle: err.message });
+  }
+}
+
+/* ============================================================
+   POST /api/v2/paquetes/pre-reserva
+   CONTRATO:
+   {
+     "idPaquete": "string",
+     "bookingUserId": "string",
+     "correo": "string",
+     "fechaInicio": "...",
+     "turistas": [...],
+     "duracionHoldSegundos": 0
+   }
    ============================================================ */
 export async function crearPreReservaPaquete(req, res) {
   try {
     const baseUrl = getBaseUrl(req);
-    const request = req.body;
+    const request = req.body || {};
 
-    const idPaqueteRaw = request?.idPaquete ?? request?.IdPaquete ?? request?.id_paquete;
-    const paqueteId = toIntOrNull(idPaqueteRaw);
-    if (!request || paqueteId == null) {
-      return res.status(400).send('Debe proporcionar id_paquete');
-    }
+    const idCheck = requireNumericIdString(request.idPaquete ?? request.IdPaquete ?? request.id_paquete, 'idPaquete');
+    if (!idCheck.ok) return res.status(400).send('Debe proporcionar id_paquete');
 
-    const codigo = await getPaqueteCodigoById(paqueteId);
-    if (!codigo) {
-      return res.status(404).send('Paquete no encontrado');
-    }
+    const correo = String(request.correo ?? request.Correo ?? '').trim() || null;
+    const bookingUserId = String(request.bookingUserId ?? request.BookingUserId ?? '').trim() || null;
 
-    const fechaInicio = request?.fechaInicio ?? request?.FechaInicio ?? request?.fecha_inicio ?? null;
-    const turistas = request?.turistas ?? request?.Turistas ?? [];
+    const fechaInicio = request.fechaInicio ?? request.FechaInicio ?? new Date().toISOString();
+    const turistas = request.turistas ?? request.Turistas ?? [];
 
-    const holdId = `HOLD-${crypto.randomUUID()}`;
-    const expira = new Date(Date.now() + 10 * 60 * 1000);
+    const codigo = await getPaqueteCodigoById(idCheck.int);
+    if (!codigo) return res.status(404).send('Paquete no encontrado');
+
+    const holdId = `HOLD-${crypto.randomUUID().replace(/-/g, '').toUpperCase()}`;
+
+    const seg = Math.max(60, parseInt(request.duracionHoldSegundos ?? '600', 10) || 600);
+    const expira = new Date(Date.now() + seg * 1000);
 
     await createHoldDB({
       id_hold: holdId,
-      paquete_codigo: String(codigo), // interno por codigo
-      fecha_inicio: fechaInicio ? String(fechaInicio).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      paquete_codigo: String(codigo),
+      fecha_inicio: String(fechaInicio).slice(0, 10),
       turistas,
-      expira_en: expira.toISOString()
+      expira_en: expira.toISOString(),
+      correo,
+      booking_user_id: bookingUserId
     });
 
     return res.json({
@@ -327,68 +339,64 @@ export async function crearPreReservaPaquete(req, res) {
 }
 
 /* ============================================================
-   4) POST /api/v2/paquetes/reserva (idPaquete ENTERO, id_reserva ENTERO)
+   POST /api/v2/paquetes/reserva
+   CONTRATO:
+   {
+     "idPaquete": "string",
+     "idHold": "string",
+     "correo": "string",
+     "metodoPago": "string",
+     "turistas": [...],
+     "paymentStatus": "string"
+   }
    ============================================================ */
 export async function reservarPaquete(req, res) {
   try {
     const baseUrl = getBaseUrl(req);
-    const request = req.body;
+    const request = req.body || {};
 
-    if (!request) {
-      return res.status(400).send('Debe proporcionar los datos de reserva');
-    }
+    const idHold = String(request.idHold ?? request.IdHold ?? request.id_hold ?? '').trim();
+    const correo = String(request.correo ?? request.Correo ?? '').trim();
 
-    const idHoldRaw = request?.idHold ?? request?.IdHold ?? request?.id_hold;
-    const correo = request?.correo ?? request?.Correo ?? null;
-
-    if (!idHoldRaw || !correo) {
+    if (!idHold || !correo) {
       return res.status(400).send('Debe proporcionar id_hold y correo');
     }
 
-    const holdId = String(idHoldRaw).trim();
-    const email = String(correo).trim();
+    const idCheck = requireNumericIdString(request.idPaquete ?? request.IdPaquete ?? request.id_paquete, 'idPaquete');
+    if (!idCheck.ok) return res.status(400).send('Debe proporcionar id_paquete');
 
-    const idPaqueteRaw = request?.idPaquete ?? request?.IdPaquete ?? request?.id_paquete;
-    const paqueteId = toIntOrNull(idPaqueteRaw);
-    if (paqueteId == null) {
-      return res.status(400).send('Debe proporcionar id_paquete');
-    }
+    const codigo = await getPaqueteCodigoById(idCheck.int);
+    if (!codigo) return res.status(404).send('Paquete no encontrado');
 
-    const codigo = await getPaqueteCodigoById(paqueteId);
-    if (!codigo) {
-      return res.status(404).send('Paquete no encontrado');
-    }
-
-    let paymentStatus = request?.paymentStatus ?? request?.PaymentStatus ?? 'paid';
-    if (String(paymentStatus).toUpperCase() === 'CONFIRMADO') {
-      paymentStatus = 'paid';
-    }
-
-    const turistas = request?.turistas ?? request?.Turistas ?? [];
-
-    const hold = await getHoldDB(holdId);
+    const hold = await getHoldDB(idHold);
     if (!hold) {
       return res.status(400).send('No se pudo confirmar la reserva. Verifique que el hold esté activo.');
     }
 
     if (hold.expira_en && new Date(hold.expira_en) < new Date()) {
-      await deleteHoldDB(holdId);
+      await deleteHoldDB(idHold);
       return res.status(400).send('No se pudo confirmar la reserva. Verifique que el hold esté activo.');
     }
 
-    // hold guarda codigo, validar que sea el mismo paquete
     if (String(hold.paquete_codigo) !== String(codigo)) {
       return res.status(400).send('No se pudo confirmar la reserva. Verifique que el hold esté activo.');
     }
 
+    const turistas = request.turistas ?? request.Turistas ?? [];
     const fecha = String(hold.fecha_inicio).slice(0, 10);
-    const adultos = turistas.filter(t => t.tipo === 'adulto' || !t.tipo).length || 1;
-    const ninos = turistas.filter(t => t.tipo === 'nino').length || 0;
+
+    const adultos = (turistas || []).filter(t => (t.tipo || '').toLowerCase() !== 'nino').length || 1;
+    const ninos = (turistas || []).filter(t => (t.tipo || '').toLowerCase() === 'nino').length || 0;
+
+    const metodoPago = String(request.metodoPago ?? request.MetodoPago ?? '').trim() || 'tarjeta';
+
+    let paymentStatus = String(request.paymentStatus ?? request.PaymentStatus ?? 'paid');
+    if (paymentStatus.toUpperCase() === 'CONFIRMADO') paymentStatus = 'paid';
 
     const user = await upsertUserByEmail({
-      nombre: email,
+      nombre: correo,
       apellido: null,
-      email
+      email: correo
     });
 
     const r = await crearReserva({
@@ -397,17 +405,20 @@ export async function reservarPaquete(req, res) {
       adultos,
       ninos,
       usuarioId: user.id,
-      origen: 'REST'
+      origen: 'REST',
+      metodoPago
     });
 
-    await deleteHoldDB(holdId);
+    await deleteHoldDB(idHold);
 
+    // ✅ contrato: idPaquete llega como string -> respondemos string
     return res.json({
-      id_reserva: Number(r.reservaId), // ✅ ENTERO
-      id_paquete: paqueteId,           // ✅ ENTERO
-      id_hold: holdId,
-      correo: email,
-      payment_status: paymentStatus,
+      id_reserva: String(r.reservaId),   // ✅ string numérico (como ejemplo)
+      id_paquete: idCheck.str,           // ✅ string
+      id_hold: idHold,
+      correo,
+      metodoPago,
+      paymentStatus,
       turistas,
       _links: generarLinksReserva(baseUrl, String(r.reservaId), null)
     });
@@ -417,110 +428,38 @@ export async function reservarPaquete(req, res) {
 }
 
 /* ============================================================
-   5) POST /api/v2/paquetes/usuarios/externo
-   ============================================================ */
-export async function crearUsuarioExterno(req, res) {
-  const request = req.body;
-
-  const correo = request?.correo ?? request?.Correo;
-  if (!request || !correo || String(correo).trim() === '') {
-    return res.status(400).send('Correo es requerido');
-  }
-
-  try {
-    const nombre = request?.nombre ?? request?.Nombre ?? null;
-    const apellido = request?.apellido ?? request?.Apellido ?? null;
-
-    const user = await upsertUserByEmail({
-      nombre: nombre ? String(nombre).trim() : null,
-      apellido: apellido != null ? String(apellido).trim() : null,
-      email: String(correo).trim()
-    });
-
-    return res.json({
-      idUsuario: user?.id ?? 0,
-      correo: String(correo).trim(),
-      exitoso: true,
-      mensaje: 'Usuario externo creado/obtenido exitosamente'
-    });
-  } catch (err) {
-    return res.status(500).json({ error: 'Error al crear usuario externo', detalle: err.message });
-  }
-}
-
-/* ============================================================
-   6) GET /api/v2/paquetes/:id/reserva   (id = ENTERO reservas.id)
-   ============================================================ */
-export async function buscarDatosReserva(req, res) {
-  try {
-    const baseUrl = getBaseUrl(req);
-    const id = String(req.params.id ?? '').trim();
-
-    if (!id) {
-      return res.status(400).send('Debe proporcionar el ID de la reserva');
-    }
-
-    if (!/^\d+$/.test(id)) {
-      return res.status(400).send('ID de reserva debe ser un número válido');
-    }
-
-    const reservaId = Number(id);
-    const r = await getReservaByIdDB(reservaId);
-    if (!r) {
-      return res.status(404).end();
-    }
-
-    // Intentar factura real por reserva_id
-    let uriFactura = `https://facturas.example.com/${id}`;
-    try {
-      const f = await getFacturaByReservaId(reservaId);
-      if (f?.codigo_factura) {
-        uriFactura = `${PUBLIC_BASE_URL}/admin/facturas/${f.codigo_factura}`;
-      }
-    } catch {
-      // noop
-    }
-
-    return res.json({
-      id_reserva: reservaId,
-      data: r,
-      _links: generarLinksReserva(baseUrl, id, uriFactura)
-    });
-  } catch (err) {
-    return res.status(500).json({ error: 'Error al obtener reserva', detalle: err.message });
-  }
-}
-
-/* ============================================================
-   7) POST /api/v2/paquetes/invoices   (idReserva ENTERO reservas.id)
+   POST /api/v2/paquetes/invoices
+   CONTRATO:
+   {
+     "idReserva": "string",
+     "correo": "string",
+     "nombre": "string",
+     "tipoIdentificacion": "string",
+     "identificacion": "string",
+     "valor": 0
+   }
    ============================================================ */
 export async function emitirFacturaPaquete(req, res) {
-  const request = req.body;
+  const request = req.body || {};
 
-  const idReservaRaw = request?.idReserva ?? request?.IdReserva ?? request?.id_reserva;
-  const reservaId = toIntOrNull(idReservaRaw);
-  if (!request || reservaId == null) {
-    return res.status(400).send('ID de reserva es requerido');
-  }
+  const idCheck = requireNumericIdString(request.idReserva ?? request.IdReserva ?? request.id_reserva, 'idReserva');
+  if (!idCheck.ok) return res.status(400).send('ID de reserva es requerido');
 
   try {
-    const codigoReserva = await getReservaCodigoByIdDB(reservaId);
-    if (!codigoReserva) {
-      return res.status(404).send('Reserva no encontrada');
-    }
+    const reservaIdInt = idCheck.int;
+    const codigoReserva = await getReservaCodigoById(reservaIdInt);
+    if (!codigoReserva) return res.status(404).send('Reserva no encontrada');
 
-    const valor = request?.valor ?? request?.Valor ?? request?.valor_pagado ?? null;
+    const valor = Number(request.valor ?? request.Valor ?? 0);
 
     let result = null;
-    if (valor != null) {
-      try {
-        result = await crearFacturaParaReserva({
-          codigoReserva: String(codigoReserva),
-          total: Number(valor)
-        });
-      } catch {
-        result = null;
-      }
+    try {
+      result = await crearFacturaParaReserva({
+        codigoReserva: String(codigoReserva),
+        total: valor
+      });
+    } catch {
+      result = null;
     }
 
     const codigoFacturaReal = result?.codigoFactura || result?.codigo_factura || null;
@@ -531,16 +470,16 @@ export async function emitirFacturaPaquete(req, res) {
 
     const uriFactura = codigoFacturaReal
       ? `${PUBLIC_BASE_URL}/admin/facturas/${codigoFacturaReal}`
-      : `https://facturas.example.com/${reservaId}`;
+      : `https://facturas.example.com/${idCheck.str}`;
 
     return res.json({
       idFactura,
-      idReserva: reservaId, // ✅ ENTERO
-      correo: request?.correo ?? request?.Correo ?? null,
-      nombreCompleto: request?.nombre ?? request?.Nombre ?? null,
-      tipoIdentificacion: request?.tipoIdentificacion ?? request?.TipoIdentificacion ?? null,
-      identificacion: request?.identificacion ?? request?.Identificacion ?? null,
-      valorPagado: valor != null ? Number(valor) : null,
+      idReserva: idCheck.str, // ✅ string como contrato
+      correo: String(request.correo ?? ''),
+      nombreCompleto: String(request.nombre ?? ''),
+      tipoIdentificacion: String(request.tipoIdentificacion ?? ''),
+      identificacion: String(request.identificacion ?? ''),
+      valorPagado: valor,
       fechaEmision: new Date(),
       uriFactura,
       mensaje: 'Factura emitida exitosamente'
@@ -551,20 +490,19 @@ export async function emitirFacturaPaquete(req, res) {
 }
 
 /* ============================================================
-   8) POST /api/v2/paquetes/cancelar   (id_reserva ENTERO reservas.id)
+   POST /api/v2/paquetes/cancelar
+   CONTRATO:
+   { "id_reserva": "string" }
    ============================================================ */
 export async function cancelarReservaPaquete(req, res) {
-  const request = req.body;
-
-  const idReservaRaw = request?.id_reserva ?? request?.idReserva ?? request?.IdReserva;
-  const reservaId = toIntOrNull(idReservaRaw);
-
-  if (!request || reservaId == null) {
-    return res.status(400).send('id_reserva es requerido');
-  }
+  const request = req.body || {};
+  const idCheck = requireNumericIdString(request.id_reserva ?? request.idReserva ?? request.IdReserva, 'id_reserva');
+  if (!idCheck.ok) return res.status(400).send('id_reserva es requerido');
 
   try {
-    const codigoReserva = await getReservaCodigoByIdDB(reservaId);
+    const reservaIdInt = idCheck.int;
+
+    const codigoReserva = await getReservaCodigoById(reservaIdInt);
     if (!codigoReserva) {
       return res.status(404).json({ error: 'Reserva no encontrada o ya está cancelada' });
     }
@@ -586,5 +524,111 @@ export async function cancelarReservaPaquete(req, res) {
     });
   } catch (err) {
     return res.status(500).json({ error: 'Error al cancelar reserva', detalle: err.message });
+  }
+}
+
+/* ============================================================
+   GET /api/v2/paquetes/:id/reserva
+   CONTRATO: :id es ID PAQUETE (int)
+   Respuesta:
+   { "id_reserva": "3", "data": {...} }
+   ============================================================ */
+export async function buscarDatosReserva(req, res) {
+  try {
+    const baseUrl = getBaseUrl(req);
+    const idParam = String(req.params.id ?? '').trim();
+
+    if (!idParam) return res.status(400).send('Debe proporcionar el ID de la reserva');
+    if (!/^\d+$/.test(idParam)) return res.status(400).send('ID de reserva debe ser un número válido');
+
+    const paqueteIdInt = Number(idParam);
+
+    // ✅ Buscar última reserva relacionada al paquete (si tienes paquete_id en reservas)
+    // Si no existe paquete_id en tu tabla, este query fallará -> hacemos fallback.
+    let reservaRow = null;
+    try {
+      const q = await poolReservas.query(
+        `SELECT * FROM reservas WHERE paquete_id=$1 ORDER BY id DESC LIMIT 1`,
+        [paqueteIdInt]
+      );
+      reservaRow = q.rows[0] ?? null;
+    } catch {
+      // Fallback: si no hay paquete_id, intenta por paquete_codigo
+      try {
+        const codigo = await getPaqueteCodigoById(paqueteIdInt);
+        if (codigo) {
+          const q2 = await poolReservas.query(
+            `SELECT * FROM reservas WHERE paquete_codigo=$1 ORDER BY id DESC LIMIT 1`,
+            [String(codigo)]
+          );
+          reservaRow = q2.rows[0] ?? null;
+        }
+      } catch {
+        reservaRow = null;
+      }
+    }
+
+    if (!reservaRow) return res.status(404).end();
+
+    // ✅ Armar "data" similar al ejemplo
+    const reservaId = reservaRow.id;
+    const codigo = reservaRow.codigo_reserva ?? reservaRow.codigo ?? null;
+
+    // detalles (si existe tabla)
+    let reservaDetalles = [];
+    try {
+      const d = await poolReservas.query(
+        `SELECT * FROM reserva_detalles WHERE reserva_id=$1 ORDER BY id ASC`,
+        [reservaId]
+      );
+      reservaDetalles = (d.rows || []).map(x => ({
+        id: x.id,
+        servicioId: x.servicio_id ?? x.servicioId ?? null,
+        cantidad: x.cantidad ?? 1,
+        precioUnitario: Number(x.precio_unitario ?? x.precioUnitario ?? 0),
+        subtotal: Number(x.subtotal ?? 0),
+        fechaInicio: x.fecha_inicio ?? x.fechaInicio ?? null,
+        fechaFin: x.fecha_fin ?? x.fechaFin ?? null
+      }));
+    } catch {
+      reservaDetalles = [];
+    }
+
+    const data = {
+      id: reservaId,
+      codigo: codigo,
+      usuarioId: reservaRow.usuario_id ?? reservaRow.usuarioId ?? null,
+      clienteId: reservaRow.cliente_id ?? reservaRow.clienteId ?? null,
+      cliente: reservaRow.cliente ?? null,
+      promocionId: reservaRow.promocion_id ?? null,
+      promocion: null,
+      subtotal: Number(reservaRow.subtotal ?? reservaRow.total_usd ?? 0),
+      descuento: Number(reservaRow.descuento ?? 0),
+      impuestos: Number(reservaRow.impuestos ?? 0),
+      total: Number(reservaRow.total ?? reservaRow.total_usd ?? 0),
+      estadoId: reservaRow.estado_id ?? reservaRow.estadoId ?? null,
+      estadoNombre: reservaRow.estado_nombre ?? reservaRow.estadoNombre ?? reservaRow.estado ?? null,
+      estado: reservaRow.estado ?? reservaRow.estado_nombre ?? null,
+      notas: reservaRow.notas ?? null,
+      createdAt: reservaRow.creado_en ?? reservaRow.created_at ?? reservaRow.createdAt ?? null,
+      reservaDetalles
+    };
+
+    // factura (si existe)
+    let uriFactura = null;
+    try {
+      const f = await getFacturaByReservaId(reservaId);
+      if (f?.codigo_factura) uriFactura = `${PUBLIC_BASE_URL}/admin/facturas/${f.codigo_factura}`;
+    } catch {
+      uriFactura = null;
+    }
+
+    return res.json({
+      id_reserva: String(reservaId), // ✅ como el ejemplo (string)
+      data,
+      _links: generarLinksReserva(baseUrl, String(reservaId), uriFactura)
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Error al obtener reserva', detalle: err.message });
   }
 }
